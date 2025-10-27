@@ -35,7 +35,12 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: "Contraseña incorrecta" });
 
     const token = jwt.sign(
-      { id: user.user_id, role: user.role_id, neighborhood: user.neighborhood_id },
+      {
+        id: user.user_id,
+        name: user.name, 
+        role: user.role_id,
+        neighborhood: user.neighborhood_id
+      },
       process.env.JWT_SECRET,
       { expiresIn: "12h" }
     );
@@ -43,7 +48,11 @@ export const login = async (req, res) => {
     res.status(200).json({
       message: "Login exitoso",
       token,
-      user: { id: user.user_id, name: user.name, role: user.role_id },
+      user: {
+        id: user.user_id,
+        name: user.name,
+        role: user.role_id,
+      },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
