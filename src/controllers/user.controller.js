@@ -1,152 +1,129 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../config/db.js";
 
-// ======================
-// 🟦 Listar usuarios
-// ======================
+const sameNeighborhood = (a, b) => Number(a) === Number(b);
+
+// Listar
 export const getUsers = async (req, res) => {
   try {
-    const user = req.user;
-    let query, values;
+    const { role, neighborhood } = req.user;
+    let query, values = [];
 
-    if (user.role === 1) {
-      // 🧠 Admin general: ve todos los usuarios
+    if (role === 1) {
       query = `
-        SELECT 
-          u.user_id,
-          u.name,
-          u.email,
-          u.address,
-          u.role_id,
-          u.neighborhood_id,
-          n.name AS neighborhood_name,
-          u.created_at
-        FROM users u
-        LEFT JOIN neighborhoods n ON u.neighborhood_id = n.neighborhood_id
-        ORDER BY u.name ASC;
-      `;
-      values = [];
-    } else {
-      // 🏘️ Admin de barrio: ve solo su propio barrio
+        SELECT u.user_id, u.name, u.email, u.role_id, u.neighborhood_id, n.name AS neighborhood_name
+        FROM users u LEFT JOIN neighborhoods n ON n.neighborhood_id = u.neighborhood_id
+        ORDER BY u.user_id DESC`;
+    } else if (role === 2) {
       query = `
-        SELECT 
-          u.user_id,
-          u.name,
-          u.email,
-          u.address,
-          u.role_id,
-          u.neighborhood_id,
-          n.name AS neighborhood_name,
-          u.created_at
-        FROM users u
-        LEFT JOIN neighborhoods n ON u.neighborhood_id = n.neighborhood_id
+        SELECT u.user_id, u.name, u.email, u.role_id, u.neighborhood_id, n.name AS neighborhood_name
+        FROM users u LEFT JOIN neighborhoods n ON n.neighborhood_id = u.neighborhood_id
         WHERE u.neighborhood_id = $1
-        ORDER BY u.name ASC;
-      `;
-      values = [user.neighborhood];
+        ORDER BY u.user_id DESC`;
+      values = [neighborhood];
+    } else {
+      return res.status(403).json({ message: "No autorizado" });
     }
 
-    const result = await pool.query(query, values);
-    res.json(result.rows);
-
-  } catch (err) {
-    console.error("Error al obtener usuarios:", err);
-    res.status(500).json({ error: err.message });
-  }
+    const { rows } = await pool.query(query, values);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// ======================
-// 🟦 Obtener usuario por ID
-// ======================
+// Obtener por id
 export const getUserById = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT 
-         u.*, 
-         n.name AS neighborhood_name 
-       FROM users u 
-       LEFT JOIN neighborhoods n ON u.neighborhood_id = n.neighborhood_id 
-       WHERE u.user_id = $1`,
-      [req.params.id]
-    );
+    const { role, neighborhood } = req.user;
+    const { id } = req.params;
 
-    if (result.rows.length === 0)
-      return res.status(404).json({ message: "Usuario no encontrado" });
+    const q = await pool.query(`SELECT user_id, name, email, role_id, neighborhood_id FROM users WHERE user_id=$1`, [id]);
+    if (q.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const target = q.rows[0];
+    if (role === 2 && !sameNeighborhood(neighborhood, target.neighborhood_id)) {
+      return res.status(403).json({ message: "No autorizado" });
+    }
+    res.json(target);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// ======================
-// 🟦 Crear usuario
-// ======================
+// Crear
 export const createUser = async (req, res) => {
   try {
-    const { name, email, password, address, role_id, neighborhood_id } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const { role, neighborhood } = req.user;
+    const { name, email, password, role_id, neighborhood_id, address } = req.body;
 
-    const query = `
-      INSERT INTO users (name, email, password_hash, address, role_id, neighborhood_id, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
-      RETURNING *;
-    `;
+    if (role === 2 && !sameNeighborhood(neighborhood, neighborhood_id)) {
+      return res.status(403).json({ message: "Solo puedes crear usuarios de tu barrio" });
+    }
 
-    const result = await pool.query(query, [
-      name,
-      email,
-      hashedPassword,
-      address,
-      role_id,
-      neighborhood_id,
-    ]);
+    // (opcional) impedir que role=2 cree Admin General
+    if (role === 2 && role_id === 1) {
+      return res.status(403).json({ message: "No puedes crear Admin General" });
+    }
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const hash = await bcrypt.hash(password, 10);
+    const { rows } = await pool.query(
+      `INSERT INTO users (name, email, password_hash, role_id, neighborhood_id, address, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       RETURNING user_id, name, email, role_id, neighborhood_id`,
+      [name, email, hash, role_id, neighborhood_id ?? null, address ?? null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// ======================
-// 🟦 Actualizar usuario
-// ======================
+// Actualizar
 export const updateUser = async (req, res) => {
   try {
-    const { name, address, role_id, neighborhood_id } = req.body;
+    const { role, neighborhood } = req.user;
+    const { id } = req.params;
+    const { name, email, password, role_id, neighborhood_id, address } = req.body;
 
-    const query = `
-      UPDATE users
-      SET name=$1, address=$2, role_id=$3, neighborhood_id=$4
-      WHERE user_id=$5
-      RETURNING *;
-    `;
+    const found = await pool.query(`SELECT neighborhood_id FROM users WHERE user_id=$1`, [id]);
+    if (found.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
 
-    const result = await pool.query(query, [
-      name,
-      address,
-      role_id,
-      neighborhood_id,
-      req.params.id,
-    ]);
+    if (role === 2 && !sameNeighborhood(neighborhood, found.rows[0].neighborhood_id)) {
+      return res.status(403).json({ message: "No autorizado" });
+    }
+    if (role === 2 && neighborhood_id && !sameNeighborhood(neighborhood, neighborhood_id)) {
+      return res.status(403).json({ message: "No puedes cambiar el usuario a otro barrio" });
+    }
+    if (role === 2 && role_id === 1) {
+      return res.status(403).json({ message: "No puedes ascender a Admin General" });
+    }
 
-    if (result.rows.length === 0)
-      return res.status(404).json({ message: "Usuario no encontrado" });
+    const sets = ["name=$1","email=$2","role_id=$3","neighborhood_id=$4","address=$5"];
+    let vals = [name, email, role_id, neighborhood_id ?? null, address ?? null, id];
+    if (password) {
+      const hash = await bcrypt.hash(password, 10);
+      sets.push("password_hash=$6");
+      vals = [name, email, role_id, neighborhood_id ?? null, address ?? null, hash, id];
+    }
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const { rows } = await pool.query(
+      `UPDATE users SET ${sets.join(", ")} WHERE user_id=$${vals.length} RETURNING user_id, name, email, role_id, neighborhood_id`,
+      vals
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// ======================
-// 🟦 Eliminar usuario
-// ======================
+// Eliminar
 export const deleteUser = async (req, res) => {
   try {
-    await pool.query("DELETE FROM users WHERE user_id=$1", [req.params.id]);
+    const { role, neighborhood } = req.user;
+    const { id } = req.params;
+
+    if (role === 2) {
+      const q = await pool.query(`SELECT neighborhood_id FROM users WHERE user_id=$1`, [id]);
+      if (q.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
+      if (!sameNeighborhood(neighborhood, q.rows[0].neighborhood_id)) {
+        return res.status(403).json({ message: "No autorizado" });
+      }
+    }
+
+    await pool.query("DELETE FROM users WHERE user_id=$1", [id]);
     res.json({ message: "Usuario eliminado correctamente" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 };
