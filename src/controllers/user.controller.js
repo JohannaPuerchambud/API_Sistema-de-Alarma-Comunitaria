@@ -3,6 +3,9 @@ import { pool } from "../config/db.js";
 
 const sameNeighborhood = (a, b) => Number(a) === Number(b);
 
+// ✅ Política de contraseña (mínimo 8, letras y números)
+const isStrongPassword = (pwd) => /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
+
 // Listar
 export const getUsers = async (req, res) => {
   try {
@@ -74,8 +77,7 @@ export const getUserById = async (req, res) => {
       [id]
     );
 
-    if (q.rows.length === 0)
-      return res.status(404).json({ message: "No encontrado" });
+    if (q.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
 
     const target = q.rows[0];
     if (role === 2 && !sameNeighborhood(neighborhood, target.neighborhood_id)) {
@@ -104,17 +106,25 @@ export const createUser = async (req, res) => {
       home_lng
     } = req.body;
 
-    if (role === 2 && !sameNeighborhood(neighborhood, neighborhood_id)) {
-      return res
-        .status(403)
-        .json({ message: "Solo puedes crear usuarios de tu barrio" });
+    // ✅ Campos mínimos
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Faltan campos obligatorios (name, email, password)." });
     }
 
-    // (opcional) impedir que role=2 cree Admin General
+    // ✅ Validación de contraseña (crear siempre requiere password)
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
+      });
+    }
+
+    if (role === 2 && !sameNeighborhood(neighborhood, neighborhood_id)) {
+      return res.status(403).json({ message: "Solo puedes crear usuarios de tu barrio" });
+    }
+
+    // impedir que role=2 cree Admin General
     if (role === 2 && role_id === 1) {
-      return res
-        .status(403)
-        .json({ message: "No puedes crear Admin General" });
+      return res.status(403).json({ message: "No puedes crear Admin General" });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -142,7 +152,7 @@ export const createUser = async (req, res) => {
         last_name ?? null,
         email,
         hash,
-        role_id,
+        role_id ?? 3,
         neighborhood_id ?? null,
         address ?? null,
         phone ?? null,
@@ -153,6 +163,9 @@ export const createUser = async (req, res) => {
 
     res.status(201).json(rows[0]);
   } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ message: "El email ya está registrado." });
+    }
     res.status(500).json({ error: err.message });
   }
 };
@@ -179,27 +192,28 @@ export const updateUser = async (req, res) => {
       `SELECT neighborhood_id FROM users WHERE user_id=$1`,
       [id]
     );
-    if (found.rows.length === 0)
-      return res.status(404).json({ message: "No encontrado" });
 
-    if (
-      role === 2 &&
-      !sameNeighborhood(neighborhood, found.rows[0].neighborhood_id)
-    ) {
+    if (found.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
+
+    if (role === 2 && !sameNeighborhood(neighborhood, found.rows[0].neighborhood_id)) {
       return res.status(403).json({ message: "No autorizado" });
     }
+
     if (role === 2 && neighborhood_id && !sameNeighborhood(neighborhood, neighborhood_id)) {
-      return res
-        .status(403)
-        .json({ message: "No puedes cambiar el usuario a otro barrio" });
-    }
-    if (role === 2 && role_id === 1) {
-      return res
-        .status(403)
-        .json({ message: "No puedes ascender a Admin General" });
+      return res.status(403).json({ message: "No puedes cambiar el usuario a otro barrio" });
     }
 
-    // 👇 Aquí estaba el problema: ahora sí incluimos last_name, phone y coordenadas
+    if (role === 2 && role_id === 1) {
+      return res.status(403).json({ message: "No puedes ascender a Admin General" });
+    }
+
+    // ✅ Si viene password, validar antes de hashear
+    if (password && !isStrongPassword(password)) {
+      return res.status(400).json({
+        message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
+      });
+    }
+
     const sets = [
       "name = $1",
       "last_name = $2",
@@ -228,7 +242,6 @@ export const updateUser = async (req, res) => {
     if (password) {
       const hash = await bcrypt.hash(password, 10);
       sets.push("password_hash = $10");
-      // insertamos el hash antes del id
       vals = [
         name,
         last_name ?? null,
@@ -263,6 +276,9 @@ export const updateUser = async (req, res) => {
 
     res.json(rows[0]);
   } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ message: "El email ya está registrado." });
+    }
     res.status(500).json({ error: err.message });
   }
 };
@@ -278,8 +294,7 @@ export const deleteUser = async (req, res) => {
         `SELECT neighborhood_id FROM users WHERE user_id=$1`,
         [id]
       );
-      if (q.rows.length === 0)
-        return res.status(404).json({ message: "No encontrado" });
+      if (q.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
       if (!sameNeighborhood(neighborhood, q.rows[0].neighborhood_id)) {
         return res.status(403).json({ message: "No autorizado" });
       }
