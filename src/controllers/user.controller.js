@@ -3,7 +3,6 @@ import { pool } from "../config/db.js";
 
 const sameNeighborhood = (a, b) => Number(a) === Number(b);
 
-// ✅ Política de contraseña (mínimo 8, letras y números)
 const isStrongPassword = (pwd) => /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
 
 // Listar
@@ -106,12 +105,10 @@ export const createUser = async (req, res) => {
       home_lng
     } = req.body;
 
-    // ✅ Campos mínimos
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Faltan campos obligatorios (name, email, password)." });
     }
 
-    // ✅ Validación de contraseña (crear siempre requiere password)
     if (!isStrongPassword(password)) {
       return res.status(400).json({
         message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
@@ -122,7 +119,6 @@ export const createUser = async (req, res) => {
       return res.status(403).json({ message: "Solo puedes crear usuarios de tu barrio" });
     }
 
-    // impedir que role=2 cree Admin General
     if (role === 2 && role_id === 1) {
       return res.status(403).json({ message: "No puedes crear Admin General" });
     }
@@ -207,7 +203,6 @@ export const updateUser = async (req, res) => {
       return res.status(403).json({ message: "No puedes ascender a Admin General" });
     }
 
-    // ✅ Si viene password, validar antes de hashear
     if (password && !isStrongPassword(password)) {
       return res.status(400).json({
         message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."

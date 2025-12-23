@@ -4,19 +4,16 @@ import { pool } from "../config/db.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-// ✅ Política de contraseña (mínimo 8, letras y números)
 const isStrongPassword = (pwd) => /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
 
 export const register = async (req, res) => {
   try {
     const { name, email, password, role_id, neighborhood_id } = req.body;
 
-    // ✅ Validaciones básicas
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Faltan campos obligatorios (name, email, password)." });
     }
 
-    // ✅ Validación de contraseña
     if (!isStrongPassword(password)) {
       return res.status(400).json({
         message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
@@ -41,7 +38,6 @@ export const register = async (req, res) => {
 
     res.status(201).json({ message: "Usuario registrado correctamente", user: result.rows[0] });
   } catch (error) {
-    // ✅ Manejo típico de email duplicado (unique constraint)
     if (error.code === "23505") {
       return res.status(409).json({ message: "El email ya está registrado." });
     }
@@ -53,13 +49,11 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // ✅ Validaciones básicas
     if (!email || !password) {
       return res.status(400).json({ message: "Email y contraseña son obligatorios." });
     }
 
-    // ✅ (Opcional) Validar formato mínimo también en login
-    // Esto no da seguridad extra real (porque el hash manda), pero evita intentos basura.
+   
     if (!isStrongPassword(password)) {
       return res.status(400).json({
         message: "Formato de contraseña inválido."

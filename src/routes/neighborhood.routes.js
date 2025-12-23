@@ -14,10 +14,8 @@ import {
 
 const router = express.Router();
 
-// 👇 Ahora Admin General ve todos los barrios y Admin de Barrio solo el suyo
 router.get("/", verifyToken, adminGeneralOrBarr, getNeighborhoods);
 
-// El resto de operaciones siguen siendo solo para Admin General
 router.get("/:id",    verifyToken, onlyAdminGeneral, getNeighborhoodById);
 router.post("/",      verifyToken, onlyAdminGeneral, createNeighborhood);
 router.put("/:id",    verifyToken, onlyAdminGeneral, updateNeighborhood);

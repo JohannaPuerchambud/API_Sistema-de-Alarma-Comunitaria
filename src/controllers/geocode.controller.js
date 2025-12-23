@@ -1,4 +1,3 @@
-// src/controllers/geocode.controller.js
 export const searchGeocode = async (req, res) => {
   try {
     const q = (req.query.q || "").trim();
@@ -10,7 +9,6 @@ export const searchGeocode = async (req, res) => {
 
     const response = await fetch(url, {
       headers: {
-        // ⚠️ ESTE HEADER ES CLAVE (sin esto Nominatim bloquea)
         "User-Agent": "AlarmaComunitariaWeb/1.0 (contacto: admin@local.app)",
         "Accept-Language": "es"
       }

@@ -8,7 +8,6 @@ export const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token.split(" ")[1], process.env.JWT_SECRET);
-    // payload esperado: { id, name, role, neighborhood }
     req.user = decoded;
     next();
   } catch {
@@ -16,7 +15,6 @@ export const verifyToken = (req, res, next) => {
   }
 };
 
-/** Permite solo los roles indicados */
 export const requireRoles = (...roles) => (req, res, next) => {
   if (!req.user) return res.status(401).json({ message: "No autenticado" });
   if (!roles.includes(req.user.role)) {
@@ -25,6 +23,5 @@ export const requireRoles = (...roles) => (req, res, next) => {
   next();
 };
 
-// Atajos
 export const onlyAdminGeneral = requireRoles(1);
 export const adminGeneralOrBarr = requireRoles(1, 2);

@@ -8,14 +8,12 @@ export const getNeighborhoods = async (req, res) => {
     let values = [];
 
     if (role === 1) {
-      // Admin General: ve todos los barrios
       query = `
         SELECT neighborhood_id, name, description, boundary, created_at
         FROM neighborhoods
         ORDER BY name ASC
       `;
     } else if (role === 2) {
-      // Admin de Barrio: solo su barrio
       query = `
         SELECT neighborhood_id, name, description, boundary, created_at
         FROM neighborhoods
@@ -63,7 +61,6 @@ export const createNeighborhood = async (req, res) => {
   }
 };
 
-// 💡 Update con boundary (delimitación)
 export const updateNeighborhood = async (req, res) => {
   try {
     const { name, description, boundary = null } = req.body;
@@ -85,7 +82,6 @@ export const updateNeighborhood = async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === "22P02") {
-      // error de JSONB inválido
       return res
         .status(400)
         .json({ error: 'Formato de "boundary" (JSONB) inválido.' });
