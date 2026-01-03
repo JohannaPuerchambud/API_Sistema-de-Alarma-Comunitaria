@@ -6,6 +6,7 @@ import { authRoutes } from "./routes/auth.routes.js";
 import { userRoutes } from "./routes/user.routes.js";
 import { neighborhoodRoutes } from "./routes/neighborhood.routes.js";
 import { geocodeRoutes } from "./routes/geocode.routes.js"; 
+import { reportRoutes } from "./routes/report.routes.js";
 
 dotenv.config();
 
@@ -16,7 +17,8 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/neighborhoods", neighborhoodRoutes);
-app.use("/api/geocode", geocodeRoutes); 
+app.use("/api/geocode", geocodeRoutes);
+app.use("/api/reports", reportRoutes); 
 
 app.get("/test", (req, res) => {
   res.json({ message: "API funcionando correctamente 🚀" });
