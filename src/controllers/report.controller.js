@@ -5,7 +5,6 @@ export const createReport = async (req, res) => {
   try {
     const { id: user_id, neighborhood: neighborhood_id, role } = req.user;
 
-    // Solo el rol "Usuario" (3) reporta desde móvil en HU-006
     if (Number(role) !== 3) {
       return res.status(403).json({ message: "Solo el rol Usuario puede crear reportes." });
     }
@@ -37,12 +36,10 @@ export const createReport = async (req, res) => {
   }
 };
 
-// Feed del barrio (para que el usuario vea reportes del barrio)
 export const getNeighborhoodReports = async (req, res) => {
   try {
     const { neighborhood: neighborhood_id, role } = req.user;
 
-    // Usuario (3) solo ve su barrio; Admins podrían ver más (te servirá luego para HU-010)
     if (Number(role) === 3 && !neighborhood_id) {
       return res.status(400).json({ message: "Tu usuario no tiene barrio asignado." });
     }
@@ -69,7 +66,6 @@ export const getNeighborhoodReports = async (req, res) => {
   }
 };
 
-// Mis reportes (opcional pero útil)
 export const getMyReports = async (req, res) => {
   try {
     const { id: user_id } = req.user;
