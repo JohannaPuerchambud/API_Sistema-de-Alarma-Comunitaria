@@ -30,6 +30,30 @@ export const createReport = async (req, res) => {
       [user_id, neighborhood_id, String(title).trim(), String(description).trim()]
     );
 
+    // 1. Crear el mensaje automático para el chat enriquecido
+    const alertMessage = `🚨 ALERTA VECINAL 🚨\nMotivo: ${String(title).trim()}\nDetalle: ${String(description).trim()}`;
+
+    const chatResult = await pool.query(
+      `INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
+   VALUES ($1, $2, $3, NOW())
+   RETURNING message_id, message, created_at`,
+      [user_id, neighborhood_id, alertMessage]
+    );
+
+    // 2. Extraer la instancia de Socket.IO que guardamos en server.js
+    const io = req.app.get("io");
+
+    // 3. Emitir el mensaje a todos los vecinos conectados en esa sala
+    io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
+      message_id: chatResult.rows[0].message_id,
+      message: chatResult.rows[0].message,
+      created_at: chatResult.rows[0].created_at,
+      user_id: user_id,
+      name: req.user.name,
+      last_name: req.user.last_name || null,
+      neighborhood_id: neighborhood_id,
+    });
+
     res.status(201).json({ message: "Reporte creado correctamente", report: rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });

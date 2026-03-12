@@ -1,15 +1,19 @@
-// server.js
 import http from "http";
-import app from "./app.js";
 import dotenv from "dotenv";
+import app from "./app.js";
 import { initSocket } from "./socket.js";
 
 dotenv.config();
 
 const PORT = process.env.PORT || 4000;
+const httpServer = http.createServer(app);
 
-const server = http.createServer(app);
+// Inicializamos Socket.IO usando tu archivo socket.js
+const io = initSocket(httpServer);
 
-initSocket(server);
+// ¡Esta es la clave! Inyectamos "io" en la app de Express para usarlo en los controladores
+app.set("io", io);
 
-server.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
+httpServer.listen(PORT, () => {
+    console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
+});
