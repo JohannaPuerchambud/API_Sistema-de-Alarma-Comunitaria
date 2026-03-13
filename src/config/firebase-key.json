@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "alarmacomunitaria-utn-5e6be",
+  "private_key_id": "8868039b7298980afa4c0883063141f1f6f75a24",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDouRiNBozp2VUu\n3N+1u9NhtbJMrEC3sg9efA5AawVgbLZXL2CA79jUIGEk7CuW0jzL5nIMjgShGFQH\nPn9UwqOLjt+AClkr38Tjrztrp2t9stzN/Uncq5s+IA5JHKqIz6UskF8q7YP2f/2R\nfp8hoNE1nJg/KdASpTCEiGVSH75Npzy4iedbYkTcAejwh9y/jofo4v/BPR+vKIPm\n2l5XxCPyAJeZVVytkDjmcOJLsejJFhmb9fR31sdIhdsBTd2Wb26hX6xzeQk7HGuQ\nSYKkJcQyRI7SgOdgNpQgFtQVCIDPYgPgIL7EOV4rn1hXcQY2kkvX3SU/2/dqktfz\nqo6Wxc6rAgMBAAECggEAG7DagP1Eixa3Egpp+//LWRb7ji/4y2K+fWmZcITLcPu+\nfoU+oFjpneP0ayZG0X1WipRzAZdsaZaxeOMw128JcrOfWGbi0Vug286f7WFQYvaD\nW2dGAKHSqQO7b2ufxwOeDb1n9X2pdA0qqMM+QAwYmJ53Zxyci3toWHy6QZlRVX/U\njsb2zN8fVE+Wa7JipZBAxGDbcOI+jvDbouRwRde6tEsQE74KUCEBh68Pl84UfBWW\nmr7muBSSuW/16GHhZudbP10M7mdmsl5Ul5onzN4S+9ax3XCMwjF32r1MZAhJ/t7Q\n6Wu56J/ZTwyrQkFCxhNmw2FQjWxFaeng8SLoa7r90QKBgQD/RgCUmjJxBpF2siwg\nHfrK+9VYGJ+JJFfQOlC+Tpj5fbh0lzVSX/qy2rAVPNB2sT3qTChblDntTCEJ5tKO\nFvp6+bovwZv8XvbYM9eQPidu9I2FrdOApjhPFVy8h4NS5zeSTX9rcL2WVrGNlmY7\nJVD/gzM+hopVIcuYB7OOzbfrLwKBgQDpYqm02lYZcx6MAUUjpmf/vrYSwVAyHMq1\nQgnAQ7xAcukeH4k46iKAktuMKORTOoJpvHusfRQPTLyOpXx/3KqGDFsWSVNDj32G\nj179yg9orbzjlSK5sZTjI6OZk80S4ioOjY23PvDI++4tA3iKFoB/x+QCvE/mO+6/\nZV8ECDyFRQKBgQCFoB05rKXu6GNI4OecQFVB4CXDodAROAcHpx8RH4+QOjFORsDQ\nyBExgqxd0aHGH+2rMgaGOcdA4nMA/eUGIB0qNoMx8IU4zHUmo6yZgw+dU0Kp0V4/\nn8MmEqaiwcUKpqI+YXbrxO5ZPjRfS3VkTJpjxkgS2Naczb4HbTCe9izqXQKBgA/E\nxsqdZevaR1oWS+GYwLYa4JprzUtVfqy4hYgkC3gfS3jpkI/z4djmE0dpC+RDs8QJ\nJCIHYW+XM7Y/oCXTdwIPm6fp1GJgM47/6N8k492iv3xw+yOox/KA2fDqd5SrC0Ro\ndAbJjeNGglUwQtixpIT9sH4u0wcvTXZJFx5ioBQxAoGAP9RtnlMscb13aY2lPE1h\nLT6fDFkFMsdWFk7pdiUbl3lyzdqFhPtBosAW2ZqVy8cFbf59AU9T4P+ITWADS2ji\nEvUP9DIicbADK2wfJdTBtScUMQ6f7KGUTeRN8dCv4y9dEq879K/f6bbs4EULysTD\noe2bRvF2XbuBscfTyUFOtDY=\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@alarmacomunitaria-utn-5e6be.iam.gserviceaccount.com",
+  "client_id": "103899221308164753238",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40alarmacomunitaria-utn-5e6be.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

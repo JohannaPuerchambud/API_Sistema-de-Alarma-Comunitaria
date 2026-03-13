@@ -301,3 +301,24 @@ export const deleteUser = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Guardar FCM Token
+export const saveFcmToken = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { fcm_token } = req.body;
+
+    if (!fcm_token) {
+      return res.status(400).json({ message: "Token requerido" });
+    }
+
+    await pool.query(
+      "UPDATE users SET fcm_token = $1 WHERE user_id = $2",
+      [fcm_token, id]
+    );
+
+    res.json({ message: "Token FCM actualizado correctamente" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
