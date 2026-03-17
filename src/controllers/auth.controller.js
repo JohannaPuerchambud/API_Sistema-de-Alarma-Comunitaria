@@ -4,19 +4,25 @@ import { pool } from "../config/db.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-const isStrongPassword = (pwd) => /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
+const isStrongPassword = (pwd) =>
+  /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
 
 export const register = async (req, res) => {
   try {
     const { name, email, password, role_id, neighborhood_id } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ message: "Faltan campos obligatorios (name, email, password)." });
+      return res
+        .status(400)
+        .json({
+          message: "Faltan campos obligatorios (name, email, password).",
+        });
     }
 
     if (!isStrongPassword(password)) {
       return res.status(400).json({
-        message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
+        message:
+          "Contraseña débil: mínimo 8 caracteres e incluir letras y números.",
       });
     }
 
@@ -33,10 +39,15 @@ export const register = async (req, res) => {
       email,
       hashedPassword,
       role_id ?? 3,
-      neighborhood_id ?? null
+      neighborhood_id ?? null,
     ]);
 
-    res.status(201).json({ message: "Usuario registrado correctamente", user: result.rows[0] });
+    res
+      .status(201)
+      .json({
+        message: "Usuario registrado correctamente",
+        user: result.rows[0],
+      });
   } catch (error) {
     if (error.code === "23505") {
       return res.status(409).json({ message: "El email ya está registrado." });
@@ -50,17 +61,26 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ message: "Email y contraseña son obligatorios." });
+      return res
+        .status(400)
+        .json({ message: "Email y contraseña son obligatorios." });
     }
 
-   
     if (!isStrongPassword(password)) {
       return res.status(400).json({
-        message: "Formato de contraseña inválido."
+        message: "Formato de contraseña inválido.",
       });
     }
 
-    const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
+    const result = await pool.query(
+      `
+      SELECT u.*, n.name AS neighborhood_name 
+      FROM users u 
+      LEFT JOIN neighborhoods n ON u.neighborhood_id = n.neighborhood_id 
+      WHERE u.email = $1
+    `,
+      [email],
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Usuario no encontrado" });
@@ -77,12 +97,16 @@ export const login = async (req, res) => {
       {
         id: user.user_id,
         name: user.name,
-        last_name: user.last_name, 
+        last_name: user.last_name,
         role: user.role_id,
-        neighborhood: user.neighborhood_id
+        neighborhood: user.neighborhood_id,
+        neighborhood_name: user.neighborhood_name,
+        email: user.email,
+        phone: user.phone,
+        address: user.address,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "12h" }
+      { expiresIn: "12h" },
     );
 
     res.status(200).json({
@@ -91,8 +115,8 @@ export const login = async (req, res) => {
       user: {
         id: user.user_id,
         name: user.name,
-        role: user.role_id
-      }
+        role: user.role_id,
+      },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

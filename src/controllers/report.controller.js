@@ -1,6 +1,16 @@
 // controllers/report.controller.js
 import { pool } from "../config/db.js";
 import admin from "../config/firebase.js";
+import twilio from "twilio";
+
+const accountSid = 'ACdf15be05ec1cc45f867439ceb578a703';
+const authToken = '68e28d60d3a4b8d3b06e314161e28fe8';
+const twilioClient = twilio(accountSid, authToken);
+
+const TWILIO_PHONE = '+19047529646'; 
+const NUMERO_CHIP_ALARMA = '+593961662731'; 
+const CLAVE_ALARMA = 'ACTIVAR'; 
+
 
 export const createReport = async (req, res) => {
   try {
@@ -10,7 +20,6 @@ export const createReport = async (req, res) => {
       return res.status(403).json({ message: "Solo el rol Usuario puede crear reportes." });
     }
 
-    // ✅ Ahora extraemos también el image_url que nos manda Flutter
     const { title, description, image_url } = req.body;
 
     if (!neighborhood_id) {
@@ -25,7 +34,6 @@ export const createReport = async (req, res) => {
       return res.status(400).json({ message: "El título no puede superar 100 caracteres." });
     }
 
-    // ✅ Cambiamos el NULL por $5 para que guarde el link de la imagen (o null si no hay)
     const { rows } = await pool.query(
       `INSERT INTO reports (user_id, neighborhood_id, title, description, image_url, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
@@ -33,7 +41,6 @@ export const createReport = async (req, res) => {
       [user_id, neighborhood_id, String(title).trim(), String(description).trim(), image_url || null]
     );
 
-    // ✅ Armamos el mensaje para el chat. Si hay foto, añadimos un aviso visual.
     const avisoFoto = image_url ? '\n📸 [Evidencia Fotográfica Adjunta]' : '';
     const alertMessage = `🚨 ALERTA VECINAL 🚨\nMotivo: ${String(title).trim()}\nDetalle: ${String(description).trim()}${avisoFoto}`;
 
@@ -56,8 +63,9 @@ export const createReport = async (req, res) => {
         neighborhood_id: neighborhood_id,
       });
     }
+
     const usersQuery = await pool.query(
-      `SELECT fcm_token FROM users 
+      `SELECT user_id, fcm_token FROM users 
        WHERE neighborhood_id = $1 AND fcm_token IS NOT NULL AND user_id != $2`,
       [neighborhood_id, user_id]
     );
@@ -65,23 +73,53 @@ export const createReport = async (req, res) => {
     const tokens = usersQuery.rows.map(row => row.fcm_token);
 
     if (tokens.length > 0) {
+      const alertTitle = "🚨 Alerta Comunitaria";
+      const alertBody = String(title).trim();
+
       const payload = {
         notification: {
-          title: "🚨 Alerta Comunitaria",
-          body: String(title).trim(),
+          title: alertTitle,
+          body: alertBody,
         },
         tokens: tokens,
       };
 
       try {
         const response = await admin.messaging().sendEachForMulticast(payload);
-        console.log("Notificaciones enviadas:", response.successCount);
+        console.log("Notificaciones push enviadas:", response.successCount);
+
+        const newReportId = rows[0].report_id;
+
+        for (const row of usersQuery.rows) {
+          await pool.query(
+            `INSERT INTO notifications (report_id, receiver_id, message, is_read, created_at)
+             VALUES ($1, $2, $3, false, NOW())`,
+            [newReportId, row.user_id, alertBody]
+          );
+        }
+        console.log("Historial guardado en la tabla notifications correctamente.");
       } catch (pushError) {
-        console.error("Error enviando push:", pushError);
+        console.error("Error procesando notificaciones:", pushError);
       }
     }
 
-    res.status(201).json({ message: "Reporte creado correctamente", report: rows[0] });
+    try {
+      console.log("Intentando activar sirena física en el poste...");
+      const message = await twilioClient.messages.create({
+        body: CLAVE_ALARMA,        
+        from: TWILIO_PHONE,        
+        to: NUMERO_CHIP_ALARMA     
+      });
+      console.log("🔊 ¡SMS enviado a la sirena! ID:", message.sid);
+    } catch (twilioError) {
+      console.error("❌ Falló el envío del SMS a la alarma:", twilioError.message);
+    }
+
+    const userResult = await pool.query(`SELECT address FROM users WHERE user_id = $1`, [user_id]);
+    const reportData = rows[0];
+    reportData.address = userResult.rows[0]?.address || null;
+
+    res.status(201).json({ message: "Reporte creado y alarma activada", report: reportData });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -103,7 +141,8 @@ export const getNeighborhoodReports = async (req, res) => {
               r.created_at,
               u.user_id,
               u.name,
-              u.last_name
+              u.last_name,
+              u.address
        FROM reports r
        INNER JOIN users u ON u.user_id = r.user_id
        WHERE r.neighborhood_id = $1
@@ -122,10 +161,11 @@ export const getMyReports = async (req, res) => {
     const { id: user_id } = req.user;
 
     const { rows } = await pool.query(
-      `SELECT report_id, neighborhood_id, title, description, image_url, created_at
-       FROM reports
-       WHERE user_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT r.report_id, r.neighborhood_id, r.title, r.description, r.image_url, r.created_at, u.address
+       FROM reports r
+       INNER JOIN users u ON u.user_id = r.user_id
+       WHERE r.user_id = $1
+       ORDER BY r.created_at DESC`,
       [user_id]
     );
 

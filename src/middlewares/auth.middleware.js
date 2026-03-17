@@ -7,7 +7,6 @@ export const verifyToken = (req, res, next) => {
   if (!authHeader) return res.status(403).json({ message: "Token no proporcionado" });
 
   try {
-    // Maneja tanto "Bearer <token>" como "<token>" directo
     const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : authHeader;
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
