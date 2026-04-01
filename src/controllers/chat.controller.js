@@ -14,7 +14,7 @@ export const getNeighborhoodMessages = async (req, res) => {
        WHERE cm.neighborhood_id = $1
        ORDER BY cm.created_at DESC
        LIMIT $2`,
-      [neighborhood, Number(limit)]
+      [neighborhood, Number(limit)],
     );
 
     res.json(q.rows.reverse()); // para que salga de antiguo->nuevo

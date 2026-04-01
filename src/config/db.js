@@ -1,6 +1,6 @@
-import pkg from 'pg';
+import pkg from "pg";
 const { Pool } = pkg;
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 dotenv.config();
 
 export const pool = new Pool({
@@ -10,6 +10,6 @@ export const pool = new Pool({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
   ssl: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false,
+  },
 });

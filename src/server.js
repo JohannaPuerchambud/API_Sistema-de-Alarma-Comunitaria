@@ -11,9 +11,8 @@ const httpServer = http.createServer(app);
 // Inicializamos Socket.IO usando tu archivo socket.js
 const io = initSocket(httpServer);
 
-// ¡Esta es la clave! Inyectamos "io" en la app de Express para usarlo en los controladores
 app.set("io", io);
 
 httpServer.listen(PORT, () => {
-    console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
+  console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
 });

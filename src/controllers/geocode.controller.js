@@ -10,8 +10,8 @@ export const searchGeocode = async (req, res) => {
     const response = await fetch(url, {
       headers: {
         "User-Agent": "AlarmaComunitariaWeb/1.0 (contacto: admin@local.app)",
-        "Accept-Language": "es"
-      }
+        "Accept-Language": "es",
+      },
     });
 
     if (!response.ok) {
@@ -20,7 +20,6 @@ export const searchGeocode = async (req, res) => {
 
     const data = await response.json();
     res.json(Array.isArray(data) ? data : []);
-
   } catch (error) {
     console.error("Geocode error:", error);
     res.status(500).json({ message: "Error de geocodificación" });

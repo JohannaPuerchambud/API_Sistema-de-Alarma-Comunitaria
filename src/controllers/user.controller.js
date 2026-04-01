@@ -3,13 +3,15 @@ import { pool } from "../config/db.js";
 
 const sameNeighborhood = (a, b) => Number(a) === Number(b);
 
-const isStrongPassword = (pwd) => /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
+const isStrongPassword = (pwd) =>
+  /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
 
 // Listar
 export const getUsers = async (req, res) => {
   try {
     const { role, neighborhood } = req.user;
-    let query, values = [];
+    let query,
+      values = [];
 
     if (role === 1) {
       query = `
@@ -73,10 +75,11 @@ export const getUserById = async (req, res) => {
               home_lng
        FROM users
        WHERE user_id = $1`,
-      [id]
+      [id],
     );
 
-    if (q.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
+    if (q.rows.length === 0)
+      return res.status(404).json({ message: "No encontrado" });
 
     const target = q.rows[0];
     if (role === 2 && !sameNeighborhood(neighborhood, target.neighborhood_id)) {
@@ -102,21 +105,28 @@ export const createUser = async (req, res) => {
       address,
       phone,
       home_lat,
-      home_lng
+      home_lng,
     } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ message: "Faltan campos obligatorios (name, email, password)." });
+      return res
+        .status(400)
+        .json({
+          message: "Faltan campos obligatorios (name, email, password).",
+        });
     }
 
     if (!isStrongPassword(password)) {
       return res.status(400).json({
-        message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
+        message:
+          "Contraseña débil: mínimo 8 caracteres e incluir letras y números.",
       });
     }
 
     if (role === 2 && !sameNeighborhood(neighborhood, neighborhood_id)) {
-      return res.status(403).json({ message: "Solo puedes crear usuarios de tu barrio" });
+      return res
+        .status(403)
+        .json({ message: "Solo puedes crear usuarios de tu barrio" });
     }
 
     if (role === 2 && role_id === 1) {
@@ -153,8 +163,8 @@ export const createUser = async (req, res) => {
         address ?? null,
         phone ?? null,
         home_lat ?? null,
-        home_lng ?? null
-      ]
+        home_lng ?? null,
+      ],
     );
 
     res.status(201).json(rows[0]);
@@ -181,31 +191,44 @@ export const updateUser = async (req, res) => {
       address,
       phone,
       home_lat,
-      home_lng
+      home_lng,
     } = req.body;
 
     const found = await pool.query(
       `SELECT neighborhood_id FROM users WHERE user_id=$1`,
-      [id]
+      [id],
     );
 
-    if (found.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
+    if (found.rows.length === 0)
+      return res.status(404).json({ message: "No encontrado" });
 
-    if (role === 2 && !sameNeighborhood(neighborhood, found.rows[0].neighborhood_id)) {
+    if (
+      role === 2 &&
+      !sameNeighborhood(neighborhood, found.rows[0].neighborhood_id)
+    ) {
       return res.status(403).json({ message: "No autorizado" });
     }
 
-    if (role === 2 && neighborhood_id && !sameNeighborhood(neighborhood, neighborhood_id)) {
-      return res.status(403).json({ message: "No puedes cambiar el usuario a otro barrio" });
+    if (
+      role === 2 &&
+      neighborhood_id &&
+      !sameNeighborhood(neighborhood, neighborhood_id)
+    ) {
+      return res
+        .status(403)
+        .json({ message: "No puedes cambiar el usuario a otro barrio" });
     }
 
     if (role === 2 && role_id === 1) {
-      return res.status(403).json({ message: "No puedes ascender a Admin General" });
+      return res
+        .status(403)
+        .json({ message: "No puedes ascender a Admin General" });
     }
 
     if (password && !isStrongPassword(password)) {
       return res.status(400).json({
-        message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números."
+        message:
+          "Contraseña débil: mínimo 8 caracteres e incluir letras y números.",
       });
     }
 
@@ -218,7 +241,7 @@ export const updateUser = async (req, res) => {
       "address = $6",
       "phone = $7",
       "home_lat = $8",
-      "home_lng = $9"
+      "home_lng = $9",
     ];
 
     let vals = [
@@ -231,7 +254,7 @@ export const updateUser = async (req, res) => {
       phone ?? null,
       home_lat ?? null,
       home_lng ?? null,
-      id
+      id,
     ];
 
     if (password) {
@@ -248,7 +271,7 @@ export const updateUser = async (req, res) => {
         home_lat ?? null,
         home_lng ?? null,
         hash,
-        id
+        id,
       ];
     }
 
@@ -266,7 +289,7 @@ export const updateUser = async (req, res) => {
                 neighborhood_id,
                 home_lat,
                 home_lng`,
-      vals
+      vals,
     );
 
     res.json(rows[0]);
@@ -287,9 +310,10 @@ export const deleteUser = async (req, res) => {
     if (role === 2) {
       const q = await pool.query(
         `SELECT neighborhood_id FROM users WHERE user_id=$1`,
-        [id]
+        [id],
       );
-      if (q.rows.length === 0) return res.status(404).json({ message: "No encontrado" });
+      if (q.rows.length === 0)
+        return res.status(404).json({ message: "No encontrado" });
       if (!sameNeighborhood(neighborhood, q.rows[0].neighborhood_id)) {
         return res.status(403).json({ message: "No autorizado" });
       }
@@ -312,10 +336,10 @@ export const saveFcmToken = async (req, res) => {
       return res.status(400).json({ message: "Token requerido" });
     }
 
-    await pool.query(
-      "UPDATE users SET fcm_token = $1 WHERE user_id = $2",
-      [fcm_token, id]
-    );
+    await pool.query("UPDATE users SET fcm_token = $1 WHERE user_id = $2", [
+      fcm_token,
+      id,
+    ]);
 
     res.json({ message: "Token FCM actualizado correctamente" });
   } catch (err) {

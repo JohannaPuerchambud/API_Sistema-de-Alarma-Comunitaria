@@ -12,11 +12,9 @@ export const register = async (req, res) => {
     const { name, email, password, role_id, neighborhood_id } = req.body;
 
     if (!name || !email || !password) {
-      return res
-        .status(400)
-        .json({
-          message: "Faltan campos obligatorios (name, email, password).",
-        });
+      return res.status(400).json({
+        message: "Faltan campos obligatorios (name, email, password).",
+      });
     }
 
     if (!isStrongPassword(password)) {
@@ -42,12 +40,10 @@ export const register = async (req, res) => {
       neighborhood_id ?? null,
     ]);
 
-    res
-      .status(201)
-      .json({
-        message: "Usuario registrado correctamente",
-        user: result.rows[0],
-      });
+    res.status(201).json({
+      message: "Usuario registrado correctamente",
+      user: result.rows[0],
+    });
   } catch (error) {
     if (error.code === "23505") {
       return res.status(409).json({ message: "El email ya está registrado." });

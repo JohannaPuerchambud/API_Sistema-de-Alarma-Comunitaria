@@ -20,7 +20,7 @@ export const initSocket = (httpServer) => {
       if (!token) return next(new Error("NO_TOKEN"));
 
       const payload = jwt.verify(token, process.env.JWT_SECRET);
-      socket.user = payload; 
+      socket.user = payload;
       next();
     } catch (e) {
       next(new Error("INVALID_TOKEN"));
@@ -50,7 +50,7 @@ export const initSocket = (httpServer) => {
         ORDER BY cm.created_at DESC
         LIMIT 50
         `,
-        [neighborhood]
+        [neighborhood],
       );
 
       socket.emit("history", rows.reverse());
@@ -69,7 +69,7 @@ export const initSocket = (httpServer) => {
           VALUES ($1, $2, $3, NOW())
           RETURNING message_id, message, created_at
           `,
-          [id, neighborhood, text]
+          [id, neighborhood, text],
         );
 
         const msg = {
