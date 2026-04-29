@@ -157,6 +157,37 @@ export const createReport = async (req, res) => {
   }
 };
 
+export const getAllReports = async (req, res) => {
+  try {
+    const { role } = req.user;
+
+    if (Number(role) !== 1 && Number(role) !== 2) {
+      return res
+        .status(403)
+        .json({ message: "No autorizado para ver todos los reportes." });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT r.report_id,
+              r.neighborhood_id,
+              r.title,
+              r.description,
+              r.image_url,
+              r.created_at,
+              u.user_id,
+              u.name,
+              u.last_name
+       FROM reports r
+       INNER JOIN users u ON u.user_id = r.user_id
+       ORDER BY r.created_at DESC`,
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const getNeighborhoodReports = async (req, res) => {
   try {
     const { neighborhood: neighborhood_id, role } = req.user;
