@@ -22,7 +22,7 @@ app.use("/api/neighborhoods", neighborhoodRoutes);
 app.use("/api/geocode", geocodeRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/chat", chatRoutes);
-app.use("/api/upc", upcRoutes);
+app.use("/api/upcs", upcRoutes);
 
 app.get("/test", (req, res) => {
   res.json({ message: "API funcionando correctamente 🚀" });
