@@ -8,9 +8,10 @@ const authToken = "68e28d60d3a4b8d3b06e314161e28fe8";
 const twilioClient = twilio(accountSid, authToken);
 
 const TWILIO_PHONE = "+19047529646";
-const NUMERO_CHIP_ALARMA = "+593961662731";
-const CLAVE_ALARMA = "ACTIVAR";
 
+// =============================================
+// REPORTES DE ACTIVIDAD SOSPECHOSA (sin sirena)
+// =============================================
 export const createReport = async (req, res) => {
   try {
     const {
@@ -60,14 +61,14 @@ export const createReport = async (req, res) => {
       ],
     );
 
-    const avisoFoto = image_url ? "\n📸 [Evidencia Fotográfica Adjunta]" : "";
-    const alertMessage = `🚨 ALERTA VECINAL 🚨\nMotivo: ${String(title).trim()}\nDetalle: ${String(description).trim()}${avisoFoto}`;
+    const avisoFoto = image_url ? "\n📸 Evidencia adjunta" : "";
+    const alertMessage = `⚠️ ACTIVIDAD SOSPECHOSA ⚠️\nMotivo: ${String(title).trim()}\nDetalle: ${String(description).trim()}${avisoFoto}`;
 
     const chatResult = await pool.query(
-      `INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
-       VALUES ($1, $2, $3, NOW())
-       RETURNING message_id, message, created_at`,
-      [user_id, neighborhood_id, alertMessage],
+      `INSERT INTO chat_messages (user_id, neighborhood_id, message, image_url, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING message_id, message, image_url, created_at`,
+      [user_id, neighborhood_id, alertMessage, image_url || null],
     );
 
     const io = req.app.get("io");
@@ -75,6 +76,7 @@ export const createReport = async (req, res) => {
       io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
         message_id: chatResult.rows[0].message_id,
         message: chatResult.rows[0].message,
+        image_url: chatResult.rows[0].image_url,
         created_at: chatResult.rows[0].created_at,
         user_id: user_id,
         name: name,
@@ -83,6 +85,7 @@ export const createReport = async (req, res) => {
       });
     }
 
+    // Notificaciones push a vecinos
     const usersQuery = await pool.query(
       `SELECT user_id, fcm_token FROM users 
        WHERE neighborhood_id = $1 AND fcm_token IS NOT NULL AND user_id != $2`,
@@ -92,7 +95,7 @@ export const createReport = async (req, res) => {
     const tokens = usersQuery.rows.map((row) => row.fcm_token);
 
     if (tokens.length > 0) {
-      const alertTitle = "🚨 Alerta Comunitaria";
+      const alertTitle = "⚠️ Actividad Sospechosa";
       const alertBody = String(title).trim();
 
       const payload = {
@@ -124,20 +127,7 @@ export const createReport = async (req, res) => {
       }
     }
 
-    try {
-      console.log("Intentando activar sirena física en el poste...");
-      const message = await twilioClient.messages.create({
-        body: CLAVE_ALARMA,
-        from: TWILIO_PHONE,
-        to: NUMERO_CHIP_ALARMA,
-      });
-      console.log("🔊 ¡SMS enviado a la sirena! ID:", message.sid);
-    } catch (twilioError) {
-      console.error(
-        "❌ Falló el envío del SMS a la alarma:",
-        twilioError.message,
-      );
-    }
+    // ✅ Ya NO se activa la sirena física en reportes de actividad sospechosa
 
     const userResult = await pool.query(
       `SELECT address FROM users WHERE user_id = $1`,
@@ -149,7 +139,7 @@ export const createReport = async (req, res) => {
     res
       .status(201)
       .json({
-        message: "Reporte creado y alarma activada",
+        message: "Reporte de actividad sospechosa creado",
         report: reportData,
       });
   } catch (err) {
@@ -157,6 +147,141 @@ export const createReport = async (req, res) => {
   }
 };
 
+// =============================================
+// EMERGENCIA REAL (activa sirena + llamada Twilio)
+// =============================================
+export const triggerEmergency = async (req, res) => {
+  try {
+    const {
+      id: user_id,
+      neighborhood: neighborhood_id,
+      role,
+      name,
+      last_name,
+    } = req.user;
+
+    if (Number(role) !== 3) {
+      return res
+        .status(403)
+        .json({ message: "Solo el rol Usuario puede activar emergencias." });
+    }
+
+    if (!neighborhood_id) {
+      return res
+        .status(400)
+        .json({ message: "Tu usuario no tiene barrio asignado." });
+    }
+
+    const { justification, latitude, longitude } = req.body;
+
+    if (!justification || String(justification).trim().length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Debes indicar el motivo de la emergencia." });
+    }
+
+    // 1. Obtener el alarm_number del barrio
+    const neighborhoodQuery = await pool.query(
+      `SELECT alarm_number, name FROM neighborhoods WHERE neighborhood_id = $1`,
+      [neighborhood_id],
+    );
+
+    if (neighborhoodQuery.rows.length === 0) {
+      return res.status(404).json({ message: "Barrio no encontrado." });
+    }
+
+    const alarmNumber = neighborhoodQuery.rows[0].alarm_number;
+    const neighborhoodName = neighborhoodQuery.rows[0].name;
+
+    // 2. Construir enlace de Google Maps
+    const mapsLink =
+      latitude && longitude
+        ? `https://maps.google.com/?q=${latitude},${longitude}`
+        : null;
+
+    // 3. Enviar alerta al chat barrial
+    const locationText = mapsLink ? `\n📍 Ubicación: ${mapsLink}` : "";
+    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${locationText}`;
+
+    const chatResult = await pool.query(
+      `INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
+       VALUES ($1, $2, $3, NOW())
+       RETURNING message_id, message, created_at`,
+      [user_id, neighborhood_id, alertMessage],
+    );
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
+        message_id: chatResult.rows[0].message_id,
+        message: chatResult.rows[0].message,
+        image_url: null,
+        created_at: chatResult.rows[0].created_at,
+        user_id: user_id,
+        name: name,
+        last_name: last_name || null,
+        neighborhood_id: neighborhood_id,
+      });
+    }
+
+    // 4. Notificaciones push a vecinos
+    const usersQuery = await pool.query(
+      `SELECT user_id, fcm_token FROM users 
+       WHERE neighborhood_id = $1 AND fcm_token IS NOT NULL AND user_id != $2`,
+      [neighborhood_id, user_id],
+    );
+
+    const tokens = usersQuery.rows.map((row) => row.fcm_token);
+
+    if (tokens.length > 0) {
+      const payload = {
+        notification: {
+          title: "🚨 ¡EMERGENCIA en tu barrio!",
+          body: `${name}: ${String(justification).trim()}`,
+        },
+        tokens: tokens,
+      };
+
+      try {
+        const response = await admin.messaging().sendEachForMulticast(payload);
+        console.log("🔔 Notificaciones de emergencia enviadas:", response.successCount);
+      } catch (pushError) {
+        console.error("Error enviando notificaciones de emergencia:", pushError);
+      }
+    }
+
+    // 5. Activar sirena física mediante LLAMADA DE VOZ (Twilio Voice)
+    if (alarmNumber) {
+      try {
+        console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}: ${alarmNumber}`);
+        const call = await twilioClient.calls.create({
+          twiml: `<Response><Say language="es-MX">Alerta de emergencia activada en el barrio ${neighborhoodName}. Emergencia reportada por ${name}.</Say><Pause length="2"/><Say language="es-MX">Alerta de emergencia activada.</Say></Response>`,
+          from: TWILIO_PHONE,
+          to: alarmNumber,
+        });
+        console.log("🔊 ¡Llamada realizada a la sirena! ID:", call.sid);
+      } catch (twilioError) {
+        console.error(
+          "❌ Falló la llamada a la alarma:",
+          twilioError.message,
+        );
+      }
+    } else {
+      console.warn("⚠️ Este barrio no tiene número de alarma configurado.");
+    }
+
+    res
+      .status(201)
+      .json({ message: "Emergencia activada correctamente" });
+  } catch (err) {
+    console.error("Error en triggerEmergency:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// =============================================
+// CONSULTAS DE REPORTES (sin cambios)
+// =============================================
 export const getAllReports = async (req, res) => {
   try {
     const { role } = req.user;

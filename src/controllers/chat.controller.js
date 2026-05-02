@@ -7,7 +7,7 @@ export const getNeighborhoodMessages = async (req, res) => {
     const { limit = 50 } = req.query;
 
     const q = await pool.query(
-      `SELECT cm.message_id, cm.message, cm.created_at,
+      `SELECT cm.message_id, cm.message, cm.image_url, cm.created_at,
               u.user_id, u.name, u.last_name
        FROM chat_messages cm
        JOIN users u ON u.user_id = cm.user_id

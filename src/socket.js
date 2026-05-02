@@ -42,7 +42,7 @@ export const initSocket = (httpServer) => {
     try {
       const { rows } = await pool.query(
         `
-        SELECT cm.message_id, cm.message, cm.created_at,
+        SELECT cm.message_id, cm.message, cm.image_url, cm.created_at,
                u.user_id, u.name, u.last_name
         FROM chat_messages cm
         JOIN users u ON u.user_id = cm.user_id
@@ -60,21 +60,24 @@ export const initSocket = (httpServer) => {
 
     socket.on("send_message", async (payload) => {
       const text = (payload?.message || "").trim();
-      if (!text) return;
+      const imageUrl = (payload?.image_url || "").trim() || null;
+
+      if (!text && !imageUrl) return;
 
       try {
         const { rows } = await pool.query(
           `
-          INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
-          VALUES ($1, $2, $3, NOW())
-          RETURNING message_id, message, created_at
+          INSERT INTO chat_messages (user_id, neighborhood_id, message, image_url, created_at)
+          VALUES ($1, $2, $3, $4, NOW())
+          RETURNING message_id, message, image_url, created_at
           `,
-          [id, neighborhood, text],
+          [id, neighborhood, text || "📷 Foto", imageUrl],
         );
 
         const msg = {
           message_id: rows[0].message_id,
           message: rows[0].message,
+          image_url: rows[0].image_url,
           created_at: rows[0].created_at,
           user_id: id,
           name: socket.user.name,
