@@ -1,6 +1,7 @@
 // routes/report.routes.js
 import { Router } from "express";
 import { verifyToken } from "../middlewares/auth.middleware.js";
+import { uploadImage } from "../middlewares/upload.middleware.js";
 import {
   createReport,
   getAllReports,
@@ -13,7 +14,8 @@ export const reportRoutes = Router();
 
 reportRoutes.get("/", verifyToken, getAllReports);
 
-reportRoutes.post("/", verifyToken, createReport);
+// ✅ Ahora acepta multipart/form-data con imagen opcional
+reportRoutes.post("/", verifyToken, uploadImage, createReport);
 
 // ✅ Nuevo endpoint de emergencia real (activa sirena)
 reportRoutes.post("/emergency", verifyToken, triggerEmergency);

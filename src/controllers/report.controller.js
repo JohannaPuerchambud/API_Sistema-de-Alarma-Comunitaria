@@ -28,7 +28,7 @@ export const createReport = async (req, res) => {
         .json({ message: "Solo el rol Usuario puede crear reportes." });
     }
 
-    const { title, description, image_url } = req.body;
+    const { title, description } = req.body;
 
     if (!neighborhood_id) {
       return res
@@ -48,6 +48,32 @@ export const createReport = async (req, res) => {
         .json({ message: "El título no puede superar 100 caracteres." });
     }
 
+    // ✅ Subir imagen a Firebase Storage desde el backend (si viene adjunta)
+    let image_url = null;
+
+    if (req.file) {
+      try {
+        const bucket = admin.storage().bucket();
+        const fileName = `reports/evidencia_${Date.now()}_${req.file.originalname}`;
+        const file = bucket.file(fileName);
+
+        await file.save(req.file.buffer, {
+          metadata: {
+            contentType: req.file.mimetype,
+          },
+        });
+
+        // Hacer el archivo público para que sea accesible por URL
+        await file.makePublic();
+        image_url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+      } catch (uploadErr) {
+        console.error("Error subiendo imagen a Firebase Storage:", uploadErr);
+        return res
+          .status(500)
+          .json({ message: "Error al subir la imagen de evidencia." });
+      }
+    }
+
     const { rows } = await pool.query(
       `INSERT INTO reports (user_id, neighborhood_id, title, description, image_url, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
@@ -57,7 +83,7 @@ export const createReport = async (req, res) => {
         neighborhood_id,
         String(title).trim(),
         String(description).trim(),
-        image_url || null,
+        image_url,
       ],
     );
 

@@ -11,6 +11,7 @@ const serviceAccount = JSON.parse(
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
+  storageBucket: "alarmacomunitaria-utn-5e6be.firebasestorage.app",
 });
 
 export default admin;

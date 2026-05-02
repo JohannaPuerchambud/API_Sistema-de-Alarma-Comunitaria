@@ -1,5 +1,6 @@
 // controllers/chat.controller.js
 import { pool } from "../config/db.js";
+import admin from "../config/firebase.js";
 
 export const getNeighborhoodMessages = async (req, res) => {
   try {
@@ -20,5 +21,33 @@ export const getNeighborhoodMessages = async (req, res) => {
     res.json(q.rows.reverse()); // para que salga de antiguo->nuevo
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+};
+
+// ✅ Endpoint para subir imágenes del chat a Firebase Storage desde el backend
+export const uploadChatImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No se recibió ninguna imagen." });
+    }
+
+    const bucket = admin.storage().bucket();
+    const fileName = `chat_images/chat_${Date.now()}_${req.file.originalname}`;
+    const file = bucket.file(fileName);
+
+    await file.save(req.file.buffer, {
+      metadata: {
+        contentType: req.file.mimetype,
+      },
+    });
+
+    // Hacer el archivo público para que sea accesible por URL
+    await file.makePublic();
+    const imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+    res.status(200).json({ image_url: imageUrl });
+  } catch (err) {
+    console.error("Error subiendo imagen del chat:", err);
+    res.status(500).json({ message: "Error al subir la imagen." });
   }
 };
