@@ -226,8 +226,8 @@ export const triggerEmergency = async (req, res) => {
         : null;
 
     // 3. Enviar alerta al chat barrial
-    const locationText = mapsLink ? `\n📍 Ubicación: ${mapsLink}` : "";
-    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${locationText}`;
+    const locationTag = latitude && longitude ? `\n[LOCATION:${latitude},${longitude}]` : "";
+    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${locationTag}`;
 
     const chatResult = await pool.query(
       `INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
