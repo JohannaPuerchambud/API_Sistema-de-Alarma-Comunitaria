@@ -41,11 +41,13 @@ export const uploadChatImage = async (req, res) => {
       },
     });
 
-    // Hacer el archivo público para que sea accesible por URL
-    await file.makePublic();
-    const imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+    // Generar URL firmada (compatible con Uniform Bucket-Level Access)
+    const [signedUrl] = await file.getSignedUrl({
+      action: "read",
+      expires: "01-01-2035",
+    });
 
-    res.status(200).json({ image_url: imageUrl });
+    res.status(200).json({ image_url: signedUrl });
   } catch (err) {
     console.error("Error subiendo imagen del chat:", err);
     res.status(500).json({ message: "Error al subir la imagen." });

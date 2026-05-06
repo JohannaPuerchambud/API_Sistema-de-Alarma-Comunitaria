@@ -63,9 +63,12 @@ export const createReport = async (req, res) => {
           },
         });
 
-        // Hacer el archivo público para que sea accesible por URL
-        await file.makePublic();
-        image_url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        // Generar URL firmada (compatible con Uniform Bucket-Level Access)
+        const [signedUrl] = await file.getSignedUrl({
+          action: "read",
+          expires: "01-01-2035",
+        });
+        image_url = signedUrl;
       } catch (uploadErr) {
         console.error("Error subiendo imagen a Firebase Storage:", uploadErr);
         return res
@@ -246,8 +249,12 @@ export const triggerEmergency = async (req, res) => {
           metadata: { contentType: req.file.mimetype },
         });
 
-        await file.makePublic();
-        evidence_url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        // Generar URL firmada (compatible con Uniform Bucket-Level Access)
+        const [signedUrl] = await file.getSignedUrl({
+          action: "read",
+          expires: "01-01-2035",
+        });
+        evidence_url = signedUrl;
       } catch (uploadErr) {
         console.error("Error subiendo imagen de emergencia:", uploadErr);
         // No bloqueamos la emergencia por un fallo de imagen

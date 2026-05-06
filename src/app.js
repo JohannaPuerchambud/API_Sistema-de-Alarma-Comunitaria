@@ -28,4 +28,21 @@ app.get("/test", (req, res) => {
   res.json({ message: "API funcionando correctamente 🚀" });
 });
 
+// ✅ Middleware global de errores: siempre devuelve JSON, nunca HTML
+app.use((err, req, res, next) => {
+  console.error("Error no controlado:", err);
+
+  // Errores de Multer (archivo muy grande, tipo inválido, etc.)
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({ message: "La imagen es demasiado grande. Máximo 5 MB." });
+  }
+  if (err.message && err.message.includes("Solo se permiten imágenes")) {
+    return res.status(400).json({ message: err.message });
+  }
+
+  res.status(err.status || 500).json({
+    message: err.message || "Error interno del servidor.",
+  });
+});
+
 export default app;
