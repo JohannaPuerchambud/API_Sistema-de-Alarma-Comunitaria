@@ -17,8 +17,8 @@ reportRoutes.get("/", verifyToken, getAllReports);
 // ✅ Ahora acepta multipart/form-data con imagen opcional
 reportRoutes.post("/", verifyToken, uploadImage, createReport);
 
-// ✅ Nuevo endpoint de emergencia real (activa sirena)
-reportRoutes.post("/emergency", verifyToken, triggerEmergency);
+// ✅ Endpoint de emergencia real (activa sirena) - ahora acepta imagen opcional
+reportRoutes.post("/emergency", verifyToken, uploadImage, triggerEmergency);
 
 reportRoutes.get("/neighborhood", verifyToken, getNeighborhoodReports);
 

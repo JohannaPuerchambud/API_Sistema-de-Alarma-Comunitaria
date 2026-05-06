@@ -232,13 +232,36 @@ export const triggerEmergency = async (req, res) => {
     // 3. Construir enlace de Google Maps con la ubicación del domicilio
     const addressText = userAddress ? `\nDirección: ${userAddress}` : "";
     const locationTag = homeLat && homeLng ? `\n[LOCATION:${homeLat},${homeLng}]` : "";
-    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${addressText}${locationTag}`;
+
+    // 4. Subir imagen de evidencia a Firebase Storage (si viene adjunta)
+    let evidence_url = null;
+
+    if (req.file) {
+      try {
+        const bucket = admin.storage().bucket();
+        const fileName = `emergencias/evidencia_${Date.now()}_${req.file.originalname}`;
+        const file = bucket.file(fileName);
+
+        await file.save(req.file.buffer, {
+          metadata: { contentType: req.file.mimetype },
+        });
+
+        await file.makePublic();
+        evidence_url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+      } catch (uploadErr) {
+        console.error("Error subiendo imagen de emergencia:", uploadErr);
+        // No bloqueamos la emergencia por un fallo de imagen
+      }
+    }
+
+    const evidenceTag = evidence_url ? "" : "\n[NO_EVIDENCE]";
+    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${addressText}${locationTag}${evidenceTag}`;
 
     const chatResult = await pool.query(
-      `INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
-       VALUES ($1, $2, $3, NOW())
-       RETURNING message_id, message, created_at`,
-      [user_id, neighborhood_id, alertMessage],
+      `INSERT INTO chat_messages (user_id, neighborhood_id, message, image_url, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING message_id, message, image_url, created_at`,
+      [user_id, neighborhood_id, alertMessage, evidence_url],
     );
 
     const io = req.app.get("io");
@@ -246,7 +269,7 @@ export const triggerEmergency = async (req, res) => {
       io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
         message_id: chatResult.rows[0].message_id,
         message: chatResult.rows[0].message,
-        image_url: null,
+        image_url: chatResult.rows[0].image_url,
         created_at: chatResult.rows[0].created_at,
         user_id: user_id,
         name: name,
