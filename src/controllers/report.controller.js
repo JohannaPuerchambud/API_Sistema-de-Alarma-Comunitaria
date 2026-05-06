@@ -198,7 +198,7 @@ export const triggerEmergency = async (req, res) => {
         .json({ message: "Tu usuario no tiene barrio asignado." });
     }
 
-    const { justification, latitude, longitude } = req.body;
+    const { justification } = req.body;
 
     if (!justification || String(justification).trim().length === 0) {
       return res
@@ -219,15 +219,20 @@ export const triggerEmergency = async (req, res) => {
     const alarmNumber = neighborhoodQuery.rows[0].alarm_number;
     const neighborhoodName = neighborhoodQuery.rows[0].name;
 
-    // 2. Construir enlace de Google Maps
-    const mapsLink =
-      latitude && longitude
-        ? `https://maps.google.com/?q=${latitude},${longitude}`
-        : null;
+    // 2. Obtener las coordenadas del domicilio registrado por el administrador
+    const userQuery = await pool.query(
+      `SELECT home_lat, home_lng, address FROM users WHERE user_id = $1`,
+      [user_id],
+    );
 
-    // 3. Enviar alerta al chat barrial
-    const locationTag = latitude && longitude ? `\n[LOCATION:${latitude},${longitude}]` : "";
-    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${locationTag}`;
+    const homeLat = userQuery.rows[0]?.home_lat;
+    const homeLng = userQuery.rows[0]?.home_lng;
+    const userAddress = userQuery.rows[0]?.address || "";
+
+    // 3. Construir enlace de Google Maps con la ubicación del domicilio
+    const addressText = userAddress ? `\nDirección: ${userAddress}` : "";
+    const locationTag = homeLat && homeLng ? `\n[LOCATION:${homeLat},${homeLng}]` : "";
+    const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${addressText}${locationTag}`;
 
     const chatResult = await pool.query(
       `INSERT INTO chat_messages (user_id, neighborhood_id, message, created_at)
