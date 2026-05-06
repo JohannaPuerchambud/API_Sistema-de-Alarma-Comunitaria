@@ -2,6 +2,7 @@
 import { pool } from "../config/db.js";
 import admin from "../config/firebase.js";
 import twilio from "twilio";
+import crypto from "crypto"; // 🟢 IMPORTANTE: Añadimos crypto para generar el token de la imagen
 
 const accountSid = "ACdf15be05ec1cc45f867439ceb578a703";
 const authToken = "68e28d60d3a4b8d3b06e314161e28fe8";
@@ -48,27 +49,32 @@ export const createReport = async (req, res) => {
         .json({ message: "El título no puede superar 100 caracteres." });
     }
 
-    // ✅ Subir imagen a Firebase Storage desde el backend (si viene adjunta)
+    // ✅ Subir imagen a Firebase Storage sin getSignedUrl
     let image_url = null;
 
     if (req.file) {
       try {
         const bucket = admin.storage().bucket();
-        const fileName = `reports/evidencia_${Date.now()}_${req.file.originalname}`;
+        // Limpiamos los espacios del nombre del archivo por seguridad
+        const safeName = req.file.originalname.replace(/\s/g, '_');
+        const fileName = `reports/evidencia_${Date.now()}_${safeName}`;
         const file = bucket.file(fileName);
+
+        // 🟢 Generamos un token nativo de Firebase
+        const token = crypto.randomUUID();
 
         await file.save(req.file.buffer, {
           metadata: {
             contentType: req.file.mimetype,
+            metadata: {
+              firebaseStorageDownloadTokens: token // Le inyectamos el token
+            }
           },
         });
 
-        // Generar URL firmada (compatible con Uniform Bucket-Level Access)
-        const [signedUrl] = await file.getSignedUrl({
-          action: "read",
-          expires: "01-01-2035",
-        });
-        image_url = signedUrl;
+        // 🟢 Construimos la URL pública manualmente (Nunca falla)
+        image_url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${token}`;
+        
       } catch (uploadErr) {
         console.error("Error subiendo imagen a Firebase Storage:", uploadErr);
         return res
@@ -156,8 +162,6 @@ export const createReport = async (req, res) => {
       }
     }
 
-    // ✅ Ya NO se activa la sirena física en reportes de actividad sospechosa
-
     const userResult = await pool.query(
       `SELECT address FROM users WHERE user_id = $1`,
       [user_id],
@@ -209,7 +213,6 @@ export const triggerEmergency = async (req, res) => {
         .json({ message: "Debes indicar el motivo de la emergencia." });
     }
 
-    // 1. Obtener el alarm_number del barrio
     const neighborhoodQuery = await pool.query(
       `SELECT alarm_number, name FROM neighborhoods WHERE neighborhood_id = $1`,
       [neighborhood_id],
@@ -222,7 +225,6 @@ export const triggerEmergency = async (req, res) => {
     const alarmNumber = neighborhoodQuery.rows[0].alarm_number;
     const neighborhoodName = neighborhoodQuery.rows[0].name;
 
-    // 2. Obtener las coordenadas del domicilio registrado por el administrador
     const userQuery = await pool.query(
       `SELECT home_lat, home_lng, address FROM users WHERE user_id = $1`,
       [user_id],
@@ -232,32 +234,36 @@ export const triggerEmergency = async (req, res) => {
     const homeLng = userQuery.rows[0]?.home_lng;
     const userAddress = userQuery.rows[0]?.address || "";
 
-    // 3. Construir enlace de Google Maps con la ubicación del domicilio
     const addressText = userAddress ? `\nDirección: ${userAddress}` : "";
     const locationTag = homeLat && homeLng ? `\n[LOCATION:${homeLat},${homeLng}]` : "";
 
-    // 4. Subir imagen de evidencia a Firebase Storage (si viene adjunta)
+    // ✅ Subir imagen de emergencia a Firebase Storage sin getSignedUrl
     let evidence_url = null;
 
     if (req.file) {
       try {
         const bucket = admin.storage().bucket();
-        const fileName = `emergencias/evidencia_${Date.now()}_${req.file.originalname}`;
+        const safeName = req.file.originalname.replace(/\s/g, '_');
+        const fileName = `emergencias/evidencia_${Date.now()}_${safeName}`;
         const file = bucket.file(fileName);
 
+        // 🟢 Generamos un token nativo de Firebase
+        const token = crypto.randomUUID();
+
         await file.save(req.file.buffer, {
-          metadata: { contentType: req.file.mimetype },
+          metadata: { 
+            contentType: req.file.mimetype,
+            metadata: {
+              firebaseStorageDownloadTokens: token // Le inyectamos el token
+            }
+          },
         });
 
-        // Generar URL firmada (compatible con Uniform Bucket-Level Access)
-        const [signedUrl] = await file.getSignedUrl({
-          action: "read",
-          expires: "01-01-2035",
-        });
-        evidence_url = signedUrl;
+        // 🟢 Construimos la URL pública manualmente
+        evidence_url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${token}`;
+        
       } catch (uploadErr) {
         console.error("Error subiendo imagen de emergencia:", uploadErr);
-        // No bloqueamos la emergencia por un fallo de imagen
       }
     }
 
@@ -285,7 +291,7 @@ export const triggerEmergency = async (req, res) => {
       });
     }
 
-    // 4. Notificaciones push a vecinos
+    // Notificaciones push a vecinos
     const usersQuery = await pool.query(
       `SELECT user_id, fcm_token FROM users 
        WHERE neighborhood_id = $1 AND fcm_token IS NOT NULL AND user_id != $2`,
@@ -311,7 +317,7 @@ export const triggerEmergency = async (req, res) => {
       }
     }
 
-    // 5. Activar sirena física mediante LLAMADA DE VOZ (Twilio Voice)
+    // Activar sirena física mediante LLAMADA DE VOZ (Twilio Voice)
     if (alarmNumber) {
       try {
         console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}: ${alarmNumber}`);
