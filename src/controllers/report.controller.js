@@ -2,6 +2,10 @@
 import { pool } from "../config/db.js";
 import admin from "../config/firebase.js";
 import twilio from "twilio";
+import {
+  claimEmergencyCooldown,
+  releaseEmergencyCooldown,
+} from "../services/emergency-cooldown.service.js";
 import crypto from "crypto"; // 🟢 IMPORTANTE: Añadimos crypto para generar el token de la imagen
 
 const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE } = process.env;
@@ -184,6 +188,11 @@ export const createReport = async (req, res) => {
 // EMERGENCIA REAL (activa sirena + llamada Twilio)
 // =============================================
 export const triggerEmergency = async (req, res) => {
+  let cooldownClaimed = false;
+  let emergencyRecorded = false;
+  let cooldownUserId = null;
+  let cooldownNeighborhoodId = null;
+
   try {
     const {
       id: user_id,
@@ -213,6 +222,12 @@ export const triggerEmergency = async (req, res) => {
         .json({ message: "Debes indicar el motivo de la emergencia." });
     }
 
+    if (String(justification).trim().length > 200) {
+      return res
+        .status(400)
+        .json({ message: "El motivo no puede superar 200 caracteres." });
+    }
+
     const neighborhoodQuery = await pool.query(
       `SELECT alarm_number, name FROM neighborhoods WHERE neighborhood_id = $1`,
       [neighborhood_id],
@@ -233,6 +248,19 @@ export const triggerEmergency = async (req, res) => {
     const homeLat = userQuery.rows[0]?.home_lat;
     const homeLng = userQuery.rows[0]?.home_lng;
     const userAddress = userQuery.rows[0]?.address || "";
+
+    const retryAfter = await claimEmergencyCooldown(user_id, neighborhood_id);
+    if (retryAfter > 0) {
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({
+        message: `Espera ${retryAfter} segundos antes de activar otra emergencia.`,
+        retry_after_seconds: retryAfter,
+      });
+    }
+
+    cooldownClaimed = true;
+    cooldownUserId = user_id;
+    cooldownNeighborhoodId = neighborhood_id;
 
     const addressText = userAddress ? `\nDirección: ${userAddress}` : "";
     const locationTag = homeLat && homeLng ? `\n[LOCATION:${homeLat},${homeLng}]` : "";
@@ -276,6 +304,7 @@ export const triggerEmergency = async (req, res) => {
        RETURNING message_id, message, image_url, created_at`,
       [user_id, neighborhood_id, alertMessage, evidence_url],
     );
+    emergencyRecorded = true;
 
     const io = req.app.get("io");
     if (io) {
@@ -299,6 +328,23 @@ export const triggerEmergency = async (req, res) => {
     );
 
     const tokens = usersQuery.rows.map((row) => row.fcm_token);
+    const delivery = {
+      chat: {
+        created: true,
+        message_id: chatResult.rows[0].message_id,
+      },
+      push: {
+        attempted: tokens.length,
+        success: 0,
+        failure: 0,
+        status: tokens.length > 0 ? "pending" : "no_recipients",
+      },
+      twilio: {
+        attempted: Boolean(alarmNumber),
+        configured: Boolean(twilioClient && TWILIO_PHONE),
+        status: alarmNumber ? "pending" : "no_alarm_number",
+      },
+    };
 
     if (tokens.length > 0) {
       const payload = {
@@ -310,10 +356,28 @@ export const triggerEmergency = async (req, res) => {
       };
 
       try {
-        const response = await admin.messaging().sendEachForMulticast(payload);
-        console.log("🔔 Notificaciones de emergencia enviadas:", response.successCount);
+        for (let i = 0; i < tokens.length; i += 500) {
+          const response = await admin.messaging().sendEachForMulticast({
+            ...payload,
+            tokens: tokens.slice(i, i + 500),
+          });
+          delivery.push.success += response.successCount;
+          delivery.push.failure += response.failureCount;
+        }
+        delivery.push.status =
+          delivery.push.failure === 0
+            ? "sent"
+            : delivery.push.success === 0
+              ? "failed"
+              : "partially_sent";
+        console.log(
+          "Notificaciones de emergencia enviadas:",
+          delivery.push.success,
+        );
       } catch (pushError) {
         console.error("Error enviando notificaciones de emergencia:", pushError);
+        delivery.push.status = "failed";
+        delivery.push.failure = tokens.length;
       }
     }
 
@@ -321,19 +385,35 @@ export const triggerEmergency = async (req, res) => {
     if (alarmNumber && twilioClient && TWILIO_PHONE) {
       try {
         console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}: ${alarmNumber}`);
+        const voiceResponse = new twilio.twiml.VoiceResponse();
+        voiceResponse.say(
+          { language: "es-MX" },
+          `Alerta de emergencia activada en el barrio ${neighborhoodName}. Emergencia reportada por ${name}.`,
+        );
+        voiceResponse.pause({ length: 2 });
+        voiceResponse.say(
+          { language: "es-MX" },
+          "Alerta de emergencia activada.",
+        );
+
         const call = await twilioClient.calls.create({
-          twiml: `<Response><Say language="es-MX">Alerta de emergencia activada en el barrio ${neighborhoodName}. Emergencia reportada por ${name}.</Say><Pause length="2"/><Say language="es-MX">Alerta de emergencia activada.</Say></Response>`,
+          twiml: voiceResponse.toString(),
           from: TWILIO_PHONE,
           to: alarmNumber,
         });
+        delivery.twilio.status = call.status || "queued";
+        delivery.twilio.call_sid = call.sid;
         console.log("🔊 ¡Llamada realizada a la sirena! ID:", call.sid);
       } catch (twilioError) {
         console.error(
           "❌ Falló la llamada a la alarma:",
           twilioError.message,
         );
+        delivery.twilio.status = "failed";
+        delivery.twilio.error = "No se pudo crear la llamada";
       }
     } else if (alarmNumber) {
+      delivery.twilio.status = "not_configured";
       console.warn(
         "Twilio no esta configurado. Define TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN y TWILIO_PHONE.",
       );
@@ -343,8 +423,11 @@ export const triggerEmergency = async (req, res) => {
 
     res
       .status(201)
-      .json({ message: "Emergencia activada correctamente" });
+      .json({ message: "Emergencia activada correctamente", delivery });
   } catch (err) {
+    if (cooldownClaimed && !emergencyRecorded) {
+      releaseEmergencyCooldown(cooldownUserId, cooldownNeighborhoodId);
+    }
     console.error("Error en triggerEmergency:", err);
     res.status(500).json({ error: err.message });
   }

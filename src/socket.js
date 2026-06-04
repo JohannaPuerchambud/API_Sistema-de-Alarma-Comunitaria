@@ -2,6 +2,7 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { pool } from "./config/db.js";
+import { getCurrentUser } from "./services/current-user.service.js";
 
 export const initSocket = (httpServer) => {
   const allowedOrigins = new Set([
@@ -20,7 +21,7 @@ export const initSocket = (httpServer) => {
     },
   });
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token =
         socket.handshake.auth?.token ||
@@ -29,7 +30,10 @@ export const initSocket = (httpServer) => {
       if (!token) return next(new Error("NO_TOKEN"));
 
       const payload = jwt.verify(token, process.env.JWT_SECRET);
-      socket.user = payload;
+      const currentUser = await getCurrentUser(payload.id);
+      if (!currentUser) return next(new Error("INVALID_USER"));
+
+      socket.user = currentUser;
       next();
     } catch (e) {
       next(new Error("INVALID_TOKEN"));
@@ -53,6 +57,7 @@ export const initSocket = (httpServer) => {
 
     const room = `neighborhood_${neighborhood}`;
     socket.join(room);
+    socket.join(`user_${id}`);
 
     try {
       const { rows } = await pool.query(
@@ -80,6 +85,17 @@ export const initSocket = (httpServer) => {
       if (!text && !imageUrl) return;
 
       try {
+        const currentUser = await getCurrentUser(id);
+        if (
+          !currentUser ||
+          Number(currentUser.role) !== 3 ||
+          Number(currentUser.neighborhood) !== Number(neighborhood)
+        ) {
+          socket.emit("error_message", "Tu sesion o permisos cambiaron.");
+          socket.disconnect(true);
+          return;
+        }
+
         const { rows } = await pool.query(
           `
           INSERT INTO chat_messages (user_id, neighborhood_id, message, image_url, created_at)

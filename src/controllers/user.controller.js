@@ -129,8 +129,10 @@ export const createUser = async (req, res) => {
         .json({ message: "Solo puedes crear usuarios de tu barrio" });
     }
 
-    if (role === 2 && Number(role_id) === 1) {
-      return res.status(403).json({ message: "No puedes crear Admin General" });
+    if (role === 2 && Number(role_id ?? 3) !== 3) {
+      return res.status(403).json({
+        message: "Solo el Admin General puede crear administradores",
+      });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -195,7 +197,7 @@ export const updateUser = async (req, res) => {
     } = req.body;
 
     const found = await pool.query(
-      `SELECT neighborhood_id FROM users WHERE user_id=$1`,
+      `SELECT neighborhood_id, role_id FROM users WHERE user_id=$1`,
       [id],
     );
 
@@ -209,6 +211,12 @@ export const updateUser = async (req, res) => {
       return res.status(403).json({ message: "No autorizado" });
     }
 
+    if (role === 2 && Number(found.rows[0].role_id) !== 3) {
+      return res.status(403).json({
+        message: "Solo el Admin General puede modificar administradores",
+      });
+    }
+
     if (
       role === 2 &&
       neighborhood_id &&
@@ -219,10 +227,10 @@ export const updateUser = async (req, res) => {
         .json({ message: "No puedes cambiar el usuario a otro barrio" });
     }
 
-    if (role === 2 && Number(role_id) === 1) {
+    if (role === 2 && Number(role_id) !== 3) {
       return res
         .status(403)
-        .json({ message: "No puedes ascender a Admin General" });
+        .json({ message: "Solo el Admin General puede asignar roles administrativos" });
     }
 
     if (password && !isStrongPassword(password)) {
@@ -292,6 +300,7 @@ export const updateUser = async (req, res) => {
       vals,
     );
 
+    req.app?.get?.("io")?.in(`user_${id}`).disconnectSockets(true);
     res.json(rows[0]);
   } catch (err) {
     if (err.code === "23505") {
@@ -309,7 +318,7 @@ export const deleteUser = async (req, res) => {
 
     if (role === 2) {
       const q = await pool.query(
-        `SELECT neighborhood_id FROM users WHERE user_id=$1`,
+        `SELECT neighborhood_id, role_id FROM users WHERE user_id=$1`,
         [id],
       );
       if (q.rows.length === 0)
@@ -317,9 +326,15 @@ export const deleteUser = async (req, res) => {
       if (!sameNeighborhood(neighborhood, q.rows[0].neighborhood_id)) {
         return res.status(403).json({ message: "No autorizado" });
       }
+      if (Number(q.rows[0].role_id) !== 3) {
+        return res.status(403).json({
+          message: "Solo el Admin General puede eliminar administradores",
+        });
+      }
     }
 
     await pool.query("DELETE FROM users WHERE user_id=$1", [id]);
+    req.app?.get?.("io")?.in(`user_${id}`).disconnectSockets(true);
     res.json({ message: "Usuario eliminado correctamente" });
   } catch (err) {
     res.status(500).json({ error: err.message });

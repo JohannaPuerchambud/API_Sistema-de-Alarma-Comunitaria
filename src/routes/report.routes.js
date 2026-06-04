@@ -24,6 +24,6 @@ reportRoutes.post("/", verifyToken, onlyUser, uploadImage, createReport);
 // ✅ Endpoint de emergencia real (activa sirena) - ahora acepta imagen opcional
 reportRoutes.post("/emergency", verifyToken, onlyUser, uploadImage, triggerEmergency);
 
-reportRoutes.get("/neighborhood", verifyToken, getNeighborhoodReports);
+reportRoutes.get("/neighborhood", verifyToken, onlyUser, getNeighborhoodReports);
 
 reportRoutes.get("/mine", verifyToken, onlyUser, getMyReports);

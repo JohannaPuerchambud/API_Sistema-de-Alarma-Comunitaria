@@ -1,8 +1,9 @@
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import { getCurrentUser } from "../services/current-user.service.js";
 dotenv.config();
 
-export const verifyToken = (req, res, next) => {
+export const verifyToken = async (req, res, next) => {
   const authHeader = req.headers["authorization"];
   if (!authHeader)
     return res.status(403).json({ message: "Token no proporcionado" });
@@ -12,9 +13,18 @@ export const verifyToken = (req, res, next) => {
       ? authHeader.split(" ")[1]
       : authHeader;
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    const currentUser = await getCurrentUser(decoded.id);
+    if (!currentUser) {
+      return res.status(401).json({ message: "La sesion ya no es valida" });
+    }
+
+    req.user = currentUser;
     next();
   } catch (error) {
+    if (error?.code) {
+      console.error("Error consultando el usuario autenticado:", error);
+      return res.status(500).json({ message: "No se pudo validar la sesion" });
+    }
     return res.status(401).json({ message: "Token inválido o expirado" });
   }
 };
