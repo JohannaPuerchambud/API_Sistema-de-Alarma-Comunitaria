@@ -5,7 +5,14 @@ import admin from "../config/firebase.js";
 export const getNeighborhoodMessages = async (req, res) => {
   try {
     const { neighborhood } = req.user; // viene del JWT (middleware)
-    const { limit = 50 } = req.query;
+    const requestedLimit = Number(req.query.limit ?? 50);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 100)
+      : 50;
+
+    if (!neighborhood) {
+      return res.status(400).json({ message: "Tu usuario no tiene barrio asignado." });
+    }
 
     const q = await pool.query(
       `SELECT cm.message_id, cm.message, cm.image_url, cm.created_at,
@@ -15,7 +22,7 @@ export const getNeighborhoodMessages = async (req, res) => {
        WHERE cm.neighborhood_id = $1
        ORDER BY cm.created_at DESC
        LIMIT $2`,
-      [neighborhood, Number(limit)],
+      [neighborhood, limit],
     );
 
     res.json(q.rows.reverse()); // para que salga de antiguo->nuevo
@@ -27,6 +34,10 @@ export const getNeighborhoodMessages = async (req, res) => {
 // ✅ Endpoint para subir imágenes del chat a Firebase Storage desde el backend
 export const uploadChatImage = async (req, res) => {
   try {
+    if (!req.user.neighborhood) {
+      return res.status(400).json({ message: "Tu usuario no tiene barrio asignado." });
+    }
+
     if (!req.file) {
       return res.status(400).json({ message: "No se recibió ninguna imagen." });
     }

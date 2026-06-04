@@ -41,6 +41,12 @@ export const initSocket = (httpServer) => {
       return;
     }
 
+    if (!neighborhood) {
+      socket.emit("error_message", "Tu usuario no tiene barrio asignado.");
+      socket.disconnect(true);
+      return;
+    }
+
     const room = `neighborhood_${neighborhood}`;
     socket.join(room);
 

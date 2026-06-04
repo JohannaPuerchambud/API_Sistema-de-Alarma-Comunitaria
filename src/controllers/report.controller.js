@@ -355,12 +355,25 @@ export const triggerEmergency = async (req, res) => {
 // =============================================
 export const getAllReports = async (req, res) => {
   try {
-    const { role } = req.user;
+    const { role, neighborhood: neighborhood_id } = req.user;
 
     if (Number(role) !== 1 && Number(role) !== 2) {
       return res
         .status(403)
         .json({ message: "No autorizado para ver todos los reportes." });
+    }
+
+    const values = [];
+    let neighborhoodFilter = "";
+
+    if (Number(role) === 2) {
+      if (!neighborhood_id) {
+        return res
+          .status(400)
+          .json({ message: "Tu administrador no tiene barrio asignado." });
+      }
+      neighborhoodFilter = "WHERE r.neighborhood_id = $1";
+      values.push(neighborhood_id);
     }
 
     const { rows } = await pool.query(
@@ -375,7 +388,9 @@ export const getAllReports = async (req, res) => {
               u.last_name
        FROM reports r
        INNER JOIN users u ON u.user_id = r.user_id
+       ${neighborhoodFilter}
        ORDER BY r.created_at DESC`,
+      values,
     );
 
     res.json(rows);

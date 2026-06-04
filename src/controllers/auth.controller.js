@@ -62,12 +62,6 @@ export const login = async (req, res) => {
         .json({ message: "Email y contraseña son obligatorios." });
     }
 
-    if (!isStrongPassword(password)) {
-      return res.status(400).json({
-        message: "Formato de contraseña inválido.",
-      });
-    }
-
     const result = await pool.query(
       `
       SELECT u.*, n.name AS neighborhood_name 

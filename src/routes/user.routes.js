@@ -10,11 +10,12 @@ import {
 import {
   verifyToken,
   adminGeneralOrBarr,
+  onlyUser,
 } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
-router.post("/fcm-token", verifyToken, saveFcmToken);
+router.post("/fcm-token", verifyToken, onlyUser, saveFcmToken);
 
 router.get("/", verifyToken, adminGeneralOrBarr, getUsers);
 router.get("/:id", verifyToken, adminGeneralOrBarr, getUserById);
