@@ -4,11 +4,11 @@ import admin from "../config/firebase.js";
 import twilio from "twilio";
 import crypto from "crypto"; // 🟢 IMPORTANTE: Añadimos crypto para generar el token de la imagen
 
-const accountSid = "ACdf15be05ec1cc45f867439ceb578a703";
-const authToken = "68e28d60d3a4b8d3b06e314161e28fe8";
-const twilioClient = twilio(accountSid, authToken);
-
-const TWILIO_PHONE = "+19047529646";
+const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE } = process.env;
+const twilioClient =
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+    ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    : null;
 
 // =============================================
 // REPORTES DE ACTIVIDAD SOSPECHOSA (sin sirena)
@@ -318,7 +318,7 @@ export const triggerEmergency = async (req, res) => {
     }
 
     // Activar sirena física mediante LLAMADA DE VOZ (Twilio Voice)
-    if (alarmNumber) {
+    if (alarmNumber && twilioClient && TWILIO_PHONE) {
       try {
         console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}: ${alarmNumber}`);
         const call = await twilioClient.calls.create({
@@ -333,6 +333,10 @@ export const triggerEmergency = async (req, res) => {
           twilioError.message,
         );
       }
+    } else if (alarmNumber) {
+      console.warn(
+        "Twilio no esta configurado. Define TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN y TWILIO_PHONE.",
+      );
     } else {
       console.warn("⚠️ Este barrio no tiene número de alarma configurado.");
     }

@@ -1,0 +1,8 @@
+node_modules/
+.env
+src/config/firebase-key.json
+npm-debug.log*
+coverage/
+uploads/
+.DS_Store
+Thumbs.db

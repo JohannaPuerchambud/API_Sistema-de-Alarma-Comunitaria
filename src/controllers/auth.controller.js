@@ -9,7 +9,7 @@ const isStrongPassword = (pwd) =>
 
 export const register = async (req, res) => {
   try {
-    const { name, email, password, role_id, neighborhood_id } = req.body;
+    const { name, email, password, neighborhood_id } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -36,7 +36,7 @@ export const register = async (req, res) => {
       name,
       email,
       hashedPassword,
-      role_id ?? 3,
+      3,
       neighborhood_id ?? null,
     ]);
 

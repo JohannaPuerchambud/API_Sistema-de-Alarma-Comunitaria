@@ -129,7 +129,7 @@ export const createUser = async (req, res) => {
         .json({ message: "Solo puedes crear usuarios de tu barrio" });
     }
 
-    if (role === 2 && role_id === 1) {
+    if (role === 2 && Number(role_id) === 1) {
       return res.status(403).json({ message: "No puedes crear Admin General" });
     }
 
@@ -219,7 +219,7 @@ export const updateUser = async (req, res) => {
         .json({ message: "No puedes cambiar el usuario a otro barrio" });
     }
 
-    if (role === 2 && role_id === 1) {
+    if (role === 2 && Number(role_id) === 1) {
       return res
         .status(403)
         .json({ message: "No puedes ascender a Admin General" });
