@@ -4,14 +4,18 @@ import jwt from "jsonwebtoken";
 import { pool } from "./config/db.js";
 
 export const initSocket = (httpServer) => {
-  const allowedOrigins = (process.env.CORS_ORIGINS || "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const allowedOrigins = new Set([
+    "https://app-sistema-de-alarma-comunitaria.onrender.com",
+    "http://localhost:4200",
+    ...(process.env.CORS_ORIGINS || "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  ]);
 
   const io = new Server(httpServer, {
     cors: {
-      origin: allowedOrigins.length > 0 ? allowedOrigins : "*",
+      origin: [...allowedOrigins],
       methods: ["GET", "POST"],
     },
   });

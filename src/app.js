@@ -14,15 +14,23 @@ dotenv.config();
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const defaultAllowedOrigins = [
+  "https://app-sistema-de-alarma-comunitaria.onrender.com",
+  "http://localhost:4200",
+];
+
+const allowedOrigins = new Set([
+  ...defaultAllowedOrigins,
+  ...(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+]);
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.has(origin)) {
         return callback(null, true);
       }
       return callback(new Error("Origen no permitido por CORS"));
