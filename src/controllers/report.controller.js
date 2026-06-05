@@ -10,6 +10,7 @@ import crypto from "crypto"; // 🟢 IMPORTANTE: Añadimos crypto para generar e
 
 const INVALID_FCM_ERROR_CODES = new Set([
   "messaging/invalid-registration-token",
+  "messaging/mismatched-credential",
   "messaging/registration-token-not-registered",
 ]);
 
