@@ -8,7 +8,61 @@ import {
 } from "../services/emergency-cooldown.service.js";
 import crypto from "crypto"; // 🟢 IMPORTANTE: Añadimos crypto para generar el token de la imagen
 
+const INVALID_FCM_ERROR_CODES = new Set([
+  "messaging/invalid-registration-token",
+  "messaging/registration-token-not-registered",
+]);
+
+const normalizePhoneNumber = (value) => {
+  if (!value) return "";
+
+  let phone = String(value).trim().replace(/[\s().-]/g, "");
+
+  if (phone.startsWith("00")) {
+    phone = `+${phone.slice(2)}`;
+  }
+
+  if (phone.startsWith("+")) {
+    return phone;
+  }
+
+  // Ecuador local formats: 09XXXXXXXX mobile or 0[2-7]XXXXXXX landline.
+  if (/^09\d{8}$/.test(phone) || /^0[2-7]\d{7}$/.test(phone)) {
+    return `+593${phone.slice(1)}`;
+  }
+
+  if (/^593\d{8,9}$/.test(phone)) {
+    return `+${phone}`;
+  }
+
+  return phone;
+};
+
+const isE164PhoneNumber = (value) => /^\+[1-9]\d{7,14}$/.test(value);
+
+const twilioStatusFromError = (errorCode) => {
+  switch (String(errorCode || "")) {
+    case "20003":
+      return "twilio_auth_failed";
+    case "21211":
+      return "invalid_alarm_number";
+    case "21212":
+    case "21606":
+      return "invalid_twilio_from";
+    case "21608":
+      return "unverified_alarm_number";
+    default:
+      return "failed";
+  }
+};
+
+const addErrorCode = (target, code, count = 1) => {
+  const key = code || "unknown";
+  target[key] = (target[key] || 0) + count;
+};
+
 const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE } = process.env;
+const TWILIO_FROM_NUMBER = normalizePhoneNumber(TWILIO_PHONE);
 const twilioClient =
   TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -127,7 +181,10 @@ export const createReport = async (req, res) => {
     // Notificaciones push a vecinos
     const usersQuery = await pool.query(
       `SELECT user_id, fcm_token FROM users 
-       WHERE neighborhood_id = $1 AND fcm_token IS NOT NULL AND user_id != $2`,
+       WHERE neighborhood_id = $1
+         AND fcm_token IS NOT NULL
+         AND btrim(fcm_token) <> ''
+         AND user_id != $2`,
       [neighborhood_id, user_id],
     );
 
@@ -237,7 +294,17 @@ export const triggerEmergency = async (req, res) => {
       return res.status(404).json({ message: "Barrio no encontrado." });
     }
 
-    const alarmNumber = neighborhoodQuery.rows[0].alarm_number;
+    const rawAlarmNumber = neighborhoodQuery.rows[0].alarm_number;
+    const alarmNumber = normalizePhoneNumber(rawAlarmNumber);
+    const hasAlarmNumber = Boolean(
+      rawAlarmNumber && String(rawAlarmNumber).trim(),
+    );
+    const alarmNumberIsValid = isE164PhoneNumber(alarmNumber);
+    const twilioIsConfigured = Boolean(
+      twilioClient &&
+        TWILIO_FROM_NUMBER &&
+        isE164PhoneNumber(TWILIO_FROM_NUMBER),
+    );
     const neighborhoodName = neighborhoodQuery.rows[0].name;
 
     const userQuery = await pool.query(
@@ -323,7 +390,10 @@ export const triggerEmergency = async (req, res) => {
     // Notificaciones push a vecinos
     const usersQuery = await pool.query(
       `SELECT user_id, fcm_token FROM users 
-       WHERE neighborhood_id = $1 AND fcm_token IS NOT NULL AND user_id != $2`,
+       WHERE neighborhood_id = $1
+         AND fcm_token IS NOT NULL
+         AND btrim(fcm_token) <> ''
+         AND user_id != $2`,
       [neighborhood_id, user_id],
     );
 
@@ -337,12 +407,18 @@ export const triggerEmergency = async (req, res) => {
         attempted: tokens.length,
         success: 0,
         failure: 0,
+        invalidated: 0,
+        error_codes: {},
         status: tokens.length > 0 ? "pending" : "no_recipients",
       },
       twilio: {
-        attempted: Boolean(alarmNumber),
-        configured: Boolean(twilioClient && TWILIO_PHONE),
-        status: alarmNumber ? "pending" : "no_alarm_number",
+        attempted: false,
+        configured: twilioIsConfigured,
+        status: hasAlarmNumber
+          ? alarmNumberIsValid
+            ? "pending"
+            : "invalid_alarm_number"
+          : "no_alarm_number",
       },
     };
 
@@ -356,14 +432,39 @@ export const triggerEmergency = async (req, res) => {
       };
 
       try {
+        const invalidTokenUserIds = new Set();
+
         for (let i = 0; i < tokens.length; i += 500) {
+          const chunkRows = usersQuery.rows.slice(i, i + 500);
           const response = await admin.messaging().sendEachForMulticast({
             ...payload,
-            tokens: tokens.slice(i, i + 500),
+            tokens: chunkRows.map((row) => row.fcm_token),
           });
           delivery.push.success += response.successCount;
           delivery.push.failure += response.failureCount;
+
+          response.responses.forEach((sendResult, index) => {
+            if (sendResult.success) return;
+
+            const errorCode = sendResult.error?.code || "unknown";
+            addErrorCode(delivery.push.error_codes, errorCode);
+
+            if (INVALID_FCM_ERROR_CODES.has(errorCode)) {
+              invalidTokenUserIds.add(chunkRows[index].user_id);
+            }
+          });
         }
+
+        if (invalidTokenUserIds.size > 0) {
+          await pool.query(
+            `UPDATE users
+             SET fcm_token = NULL
+             WHERE user_id = ANY($1::int[])`,
+            [[...invalidTokenUserIds]],
+          );
+          delivery.push.invalidated = invalidTokenUserIds.size;
+        }
+
         delivery.push.status =
           delivery.push.failure === 0
             ? "sent"
@@ -378,13 +479,18 @@ export const triggerEmergency = async (req, res) => {
         console.error("Error enviando notificaciones de emergencia:", pushError);
         delivery.push.status = "failed";
         delivery.push.failure = tokens.length;
+        addErrorCode(delivery.push.error_codes, pushError.code);
       }
     }
 
     // Activar sirena física mediante LLAMADA DE VOZ (Twilio Voice)
-    if (alarmNumber && twilioClient && TWILIO_PHONE) {
+    if (hasAlarmNumber && !alarmNumberIsValid) {
+      console.warn(
+        "El numero de alarma del barrio no tiene formato E.164 valido.",
+      );
+    } else if (alarmNumber && twilioIsConfigured) {
       try {
-        console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}: ${alarmNumber}`);
+        console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}`);
         const voiceResponse = new twilio.twiml.VoiceResponse();
         voiceResponse.say(
           { language: "es-MX" },
@@ -398,9 +504,10 @@ export const triggerEmergency = async (req, res) => {
 
         const call = await twilioClient.calls.create({
           twiml: voiceResponse.toString(),
-          from: TWILIO_PHONE,
+          from: TWILIO_FROM_NUMBER,
           to: alarmNumber,
         });
+        delivery.twilio.attempted = true;
         delivery.twilio.status = call.status || "queued";
         delivery.twilio.call_sid = call.sid;
         console.log("🔊 ¡Llamada realizada a la sirena! ID:", call.sid);
@@ -409,10 +516,11 @@ export const triggerEmergency = async (req, res) => {
           "❌ Falló la llamada a la alarma:",
           twilioError.message,
         );
-        delivery.twilio.status = "failed";
-        delivery.twilio.error = "No se pudo crear la llamada";
+        delivery.twilio.attempted = true;
+        delivery.twilio.status = twilioStatusFromError(twilioError.code);
+        delivery.twilio.error_code = twilioError.code || null;
       }
-    } else if (alarmNumber) {
+    } else if (hasAlarmNumber) {
       delivery.twilio.status = "not_configured";
       console.warn(
         "Twilio no esta configurado. Define TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN y TWILIO_PHONE.",

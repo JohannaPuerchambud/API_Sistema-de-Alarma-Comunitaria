@@ -208,3 +208,64 @@ test("la emergencia informa resultados verificables de entrega", async () => {
     pool.query = originalQuery;
   }
 });
+
+test("la emergencia no llama a Twilio con un numero de alarma invalido", async () => {
+  const originalQuery = pool.query;
+  pool.query = async (sql) => {
+    const query = String(sql);
+
+    if (query.includes("SELECT alarm_number, name")) {
+      return { rows: [{ alarm_number: "12345", name: "Barrio Seguro" }] };
+    }
+    if (query.includes("SELECT home_lat, home_lng, address")) {
+      return { rows: [{ home_lat: null, home_lng: null, address: null }] };
+    }
+    if (query.includes("message LIKE '%EMERGENCIA ACTIVADA%'")) {
+      return { rows: [] };
+    }
+    if (query.includes("INSERT INTO chat_messages")) {
+      return {
+        rows: [
+          {
+            message_id: 56,
+            message: "EMERGENCIA ACTIVADA",
+            image_url: null,
+            created_at: new Date(),
+          },
+        ],
+      };
+    }
+    if (query.includes("SELECT user_id, fcm_token")) {
+      return { rows: [] };
+    }
+
+    throw new Error(`Consulta inesperada: ${query}`);
+  };
+
+  try {
+    const res = createResponse();
+    await triggerEmergency(
+      {
+        user: {
+          id: 902,
+          role: 3,
+          neighborhood: 78,
+          name: "Vecino",
+          last_name: "Prueba",
+        },
+        body: { justification: "Prueba controlada" },
+        file: null,
+        app: { get: () => null },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.payload.delivery.chat.created, true);
+    assert.equal(res.payload.delivery.twilio.status, "invalid_alarm_number");
+    assert.equal(res.payload.delivery.twilio.attempted, false);
+  } finally {
+    releaseEmergencyCooldown(902, 78);
+    pool.query = originalQuery;
+  }
+});
