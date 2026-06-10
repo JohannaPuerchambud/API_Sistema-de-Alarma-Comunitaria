@@ -1,25 +1,37 @@
 import { pool } from "../config/db.js";
 
-// Listar barrios
+// ── Listar barrios con nombre de UPC y datos del representante (role_id=2) ──
 export const getNeighborhoods = async (req, res) => {
   try {
     const { role, neighborhood } = req.user || {};
     let query;
     let values = [];
 
+    const baseSelect = `
+      SELECT
+        n.neighborhood_id,
+        n.name,
+        n.description,
+        n.boundary,
+        n.alarm_number,
+        n.upc_id,
+        n.created_at,
+        upc.name         AS upc_name,
+        adm.user_id      AS admin_user_id,
+        adm.name         AS admin_name,
+        adm.last_name    AS admin_last_name,
+        adm.email        AS admin_email,
+        adm.phone        AS admin_phone
+      FROM neighborhoods n
+      LEFT JOIN upcs upc ON upc.upc_id = n.upc_id
+      LEFT JOIN users adm ON adm.neighborhood_id = n.neighborhood_id
+                         AND adm.role_id = 2
+    `;
+
     if (role === 1) {
-      query = `
-        SELECT neighborhood_id, name, description, boundary, alarm_number, upc_id, created_at
-        FROM neighborhoods
-        ORDER BY name ASC
-      `;
+      query = `${baseSelect} ORDER BY n.name ASC`;
     } else if (role === 2) {
-      query = `
-        SELECT neighborhood_id, name, description, boundary, alarm_number, upc_id, created_at
-        FROM neighborhoods
-        WHERE neighborhood_id = $1
-        ORDER BY name ASC
-      `;
+      query = `${baseSelect} WHERE n.neighborhood_id = $1 ORDER BY n.name ASC`;
       values = [neighborhood];
     } else {
       return res.status(403).json({ message: "No autorizado" });
@@ -34,14 +46,32 @@ export const getNeighborhoods = async (req, res) => {
 
 export const getNeighborhoodById = async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM neighborhoods WHERE neighborhood_id = $1",
+    const { rows } = await pool.query(
+      `SELECT
+        n.neighborhood_id,
+        n.name,
+        n.description,
+        n.boundary,
+        n.alarm_number,
+        n.upc_id,
+        n.created_at,
+        upc.name         AS upc_name,
+        adm.user_id      AS admin_user_id,
+        adm.name         AS admin_name,
+        adm.last_name    AS admin_last_name,
+        adm.email        AS admin_email,
+        adm.phone        AS admin_phone
+       FROM neighborhoods n
+       LEFT JOIN upcs upc ON upc.upc_id = n.upc_id
+       LEFT JOIN users adm ON adm.neighborhood_id = n.neighborhood_id
+                          AND adm.role_id = 2
+       WHERE n.neighborhood_id = $1`,
       [req.params.id],
     );
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ message: "Barrio no encontrado" });
     }
-    res.json(result.rows[0]);
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -57,8 +87,6 @@ export const createNeighborhood = async (req, res) => {
       upc_id = null,
     } = req.body;
 
-    const validUpcId = upc_id ? upc_id : null;
-
     const query = `
       INSERT INTO neighborhoods (name, description, boundary, alarm_number, upc_id, created_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
@@ -68,7 +96,7 @@ export const createNeighborhood = async (req, res) => {
       description,
       boundary,
       alarm_number,
-      validUpcId,
+      upc_id || null,
     ]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -87,8 +115,6 @@ export const updateNeighborhood = async (req, res) => {
     } = req.body;
     const { id } = req.params;
 
-    const validUpcId = upc_id ? upc_id : null;
-
     const query = `
       UPDATE neighborhoods
       SET name = $1,
@@ -104,7 +130,7 @@ export const updateNeighborhood = async (req, res) => {
       description,
       boundary,
       alarm_number,
-      validUpcId,
+      upc_id || null,
       id,
     ]);
 
@@ -143,6 +169,73 @@ export const deleteNeighborhood = async (req, res) => {
           "No se puede eliminar el barrio porque tiene usuarios asignados.",
       });
     }
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ─── Representante del barrio ────────────────────────────────────────────────
+
+/**
+ * GET /api/neighborhoods/:id/admin
+ * Devuelve el usuario con role_id = 2 asignado a este barrio (representante).
+ */
+export const getNeighborhoodAdmin = async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT user_id, name, last_name, email, phone
+       FROM users
+       WHERE role_id = 2 AND neighborhood_id = $1
+       LIMIT 1`,
+      [req.params.id],
+    );
+    // Devuelve null si no hay representante asignado (válido en front)
+    res.json(rows.length > 0 ? rows[0] : null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * PUT /api/neighborhoods/:id/admin
+ * Body: { admin_user_id: number | null }
+ *
+ * Asigna un Admin de barrio (role_id=2) al barrio actualizando su
+ * neighborhood_id. Si admin_user_id es null, desvincula el admin actual.
+ * No crea ningún campo nuevo en neighborhoods.
+ */
+export const setNeighborhoodAdmin = async (req, res) => {
+  const { id } = req.params; // neighborhood_id
+  const { admin_user_id } = req.body;
+
+  try {
+    // 1. Desvincular el admin previo de este barrio (si existe)
+    await pool.query(
+      `UPDATE users SET neighborhood_id = NULL
+       WHERE role_id = 2 AND neighborhood_id = $1`,
+      [id],
+    );
+
+    if (admin_user_id) {
+      // 2. Verificar que el usuario existe y tiene role_id = 2
+      const check = await pool.query(
+        `SELECT user_id FROM users WHERE user_id = $1 AND role_id = 2`,
+        [admin_user_id],
+      );
+      if (check.rows.length === 0) {
+        return res.status(404).json({
+          message: "Usuario no encontrado o no tiene rol Admin Barrio.",
+        });
+      }
+
+      // 3. Asignar el nuevo admin al barrio
+      await pool.query(
+        `UPDATE users SET neighborhood_id = $1 WHERE user_id = $2`,
+        [id, admin_user_id],
+      );
+    }
+
+    res.json({ message: "Representante actualizado correctamente." });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };

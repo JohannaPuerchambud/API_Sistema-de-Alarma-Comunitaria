@@ -27,11 +27,11 @@ export const getUpcById = async (req, res) => {
 
 export const createUpc = async (req, res) => {
   try {
-    const { name, description, address, phone, coverage_polygon } = req.body;
+    const { name, description, address, phone, coverage_polygon, lat, lng } = req.body;
 
     const query = `
-      INSERT INTO upcs (name, description, address, phone, coverage_polygon, created_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
+      INSERT INTO upcs (name, description, address, phone, coverage_polygon, lat, lng, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
       RETURNING *`;
 
     const { rows } = await pool.query(query, [
@@ -40,6 +40,8 @@ export const createUpc = async (req, res) => {
       address,
       phone,
       coverage_polygon || null,
+      lat || null,
+      lng || null,
     ]);
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -50,12 +52,12 @@ export const createUpc = async (req, res) => {
 export const updateUpc = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, address, phone, coverage_polygon } = req.body;
+    const { name, description, address, phone, coverage_polygon, lat, lng } = req.body;
 
     const query = `
       UPDATE upcs
-      SET name = $1, description = $2, address = $3, phone = $4, coverage_polygon = $5
-      WHERE upc_id = $6
+      SET name = $1, description = $2, address = $3, phone = $4, coverage_polygon = $5, lat = $6, lng = $7
+      WHERE upc_id = $8
       RETURNING *`;
 
     const { rows } = await pool.query(query, [
@@ -64,6 +66,8 @@ export const updateUpc = async (req, res) => {
       address,
       phone,
       coverage_polygon || null,
+      lat || null,
+      lng || null,
       id,
     ]);
 

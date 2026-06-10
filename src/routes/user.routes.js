@@ -1,11 +1,12 @@
 import express from "express";
-import { saveFcmToken } from "../controllers/user.controller.js";
 import {
+  saveFcmToken,
   getUsers,
   getUserById,
   createUser,
   updateUser,
   deleteUser,
+  getAdmins,
 } from "../controllers/user.controller.js";
 import {
   verifyToken,
@@ -17,6 +18,7 @@ const router = express.Router();
 
 router.post("/fcm-token", verifyToken, onlyUser, saveFcmToken);
 
+router.get("/admins", verifyToken, onlyAdminGeneral, getAdmins);
 router.get("/", verifyToken, adminGeneralOrBarr, getUsers);
 router.get("/:id", verifyToken, adminGeneralOrBarr, getUserById);
 router.post("/", verifyToken, adminGeneralOrBarr, createUser);

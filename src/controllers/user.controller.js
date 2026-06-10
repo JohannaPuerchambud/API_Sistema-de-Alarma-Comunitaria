@@ -361,3 +361,31 @@ export const saveFcmToken = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+/**
+ * GET /api/users/admins
+ * Devuelve todos los usuarios con role_id = 2 (Admins de Barrio)
+ * con el nombre del barrio que administran actualmente (si tienen uno).
+ * Usado en el selector de representante del CRUD de barrios.
+ */
+export const getAdmins = async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        u.user_id,
+        u.name,
+        u.last_name,
+        u.email,
+        u.phone,
+        u.neighborhood_id,
+        n.name AS neighborhood_name
+      FROM users u
+      LEFT JOIN neighborhoods n ON n.neighborhood_id = u.neighborhood_id
+      WHERE u.role_id = 2
+      ORDER BY u.name ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
