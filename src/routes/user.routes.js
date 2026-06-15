@@ -10,6 +10,7 @@ import {
 } from "../controllers/user.controller.js";
 import {
   verifyToken,
+  onlyAdminGeneral,
   adminGeneralOrBarr,
   onlyUser,
 } from "../middlewares/auth.middleware.js";
