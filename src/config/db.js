@@ -1,7 +1,21 @@
 import pkg from "pg";
-const { Pool } = pkg;
 import dotenv from "dotenv";
+
 dotenv.config();
+
+const { Pool } = pkg;
+const sslEnabled = String(process.env.DB_SSL ?? "true").toLowerCase() !== "false";
+const rejectUnauthorized =
+  String(process.env.DB_SSL_REJECT_UNAUTHORIZED ?? "true").toLowerCase() !== "false";
+
+const ssl = sslEnabled
+  ? {
+      rejectUnauthorized,
+      ...(process.env.DB_SSL_CA
+        ? { ca: process.env.DB_SSL_CA.replace(/\\n/g, "\n") }
+        : {}),
+    }
+  : false;
 
 export const pool = new Pool({
   host: process.env.DB_HOST,
@@ -9,7 +23,5 @@ export const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl,
 });

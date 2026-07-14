@@ -73,6 +73,8 @@ const twilioClient =
 // REPORTES DE ACTIVIDAD SOSPECHOSA (sin sirena)
 // =============================================
 export const createReport = async (req, res) => {
+  let uploadedFile = null;
+
   try {
     const {
       id: user_id,
@@ -115,9 +117,10 @@ export const createReport = async (req, res) => {
       try {
         const bucket = admin.storage().bucket();
         // Limpiamos los espacios del nombre del archivo por seguridad
-        const safeName = req.file.originalname.replace(/\s/g, '_');
+        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
         const fileName = `reports/evidencia_${Date.now()}_${safeName}`;
         const file = bucket.file(fileName);
+        uploadedFile = file;
 
         // 🟢 Generamos un token nativo de Firebase
         const token = crypto.randomUUID();
@@ -142,36 +145,47 @@ export const createReport = async (req, res) => {
       }
     }
 
+    const avisoFoto = image_url ? "\n📸 Evidencia adjunta" : "";
+    const alertMessage = `⚠️ ACTIVIDAD SOSPECHOSA ⚠️
+Motivo: ${String(title).trim()}
+Detalle: ${String(description).trim()}${avisoFoto}`;
+
     const { rows } = await pool.query(
-      `INSERT INTO reports (user_id, neighborhood_id, title, description, image_url, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       RETURNING report_id, user_id, neighborhood_id, title, description, image_url, created_at`,
+      `WITH new_report AS (
+         INSERT INTO reports
+           (user_id, neighborhood_id, title, description, image_url, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         RETURNING report_id, user_id, neighborhood_id, title, description, image_url, created_at
+       ),
+       new_chat AS (
+         INSERT INTO chat_messages
+           (user_id, neighborhood_id, message, image_url, created_at)
+         VALUES ($1, $2, $6, $5, NOW())
+         RETURNING message_id, message, image_url, created_at
+       )
+       SELECT r.*,
+              c.message_id AS chat_message_id,
+              c.message AS chat_message,
+              c.image_url AS chat_image_url,
+              c.created_at AS chat_created_at
+       FROM new_report r
+       CROSS JOIN new_chat c`,
       [
         user_id,
         neighborhood_id,
         String(title).trim(),
         String(description).trim(),
         image_url,
+        alertMessage,
       ],
     );
-
-    const avisoFoto = image_url ? "\n📸 Evidencia adjunta" : "";
-    const alertMessage = `⚠️ ACTIVIDAD SOSPECHOSA ⚠️\nMotivo: ${String(title).trim()}\nDetalle: ${String(description).trim()}${avisoFoto}`;
-
-    const chatResult = await pool.query(
-      `INSERT INTO chat_messages (user_id, neighborhood_id, message, image_url, created_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       RETURNING message_id, message, image_url, created_at`,
-      [user_id, neighborhood_id, alertMessage, image_url || null],
-    );
-
     const io = req.app.get("io");
     if (io) {
       io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
-        message_id: chatResult.rows[0].message_id,
-        message: chatResult.rows[0].message,
-        image_url: chatResult.rows[0].image_url,
-        created_at: chatResult.rows[0].created_at,
+        message_id: rows[0].chat_message_id,
+        message: rows[0].chat_message,
+        image_url: rows[0].chat_image_url,
+        created_at: rows[0].chat_created_at,
         user_id: user_id,
         name: name,
         last_name: last_name || null,
@@ -181,11 +195,11 @@ export const createReport = async (req, res) => {
 
     // Notificaciones push a vecinos
     const usersQuery = await pool.query(
-      `SELECT user_id, fcm_token FROM users 
-       WHERE neighborhood_id = $1
-         AND fcm_token IS NOT NULL
-         AND btrim(fcm_token) <> ''
-         AND user_id != $2`,
+      `SELECT u.user_id, pt.fcm_token
+       FROM user_push_tokens pt
+       INNER JOIN users u ON u.user_id = pt.user_id
+       WHERE u.neighborhood_id = $1
+         AND u.user_id != $2`,
       [neighborhood_id, user_id],
     );
 
@@ -209,11 +223,15 @@ export const createReport = async (req, res) => {
 
         const newReportId = rows[0].report_id;
 
-        for (const row of usersQuery.rows) {
+        const recipientIds = [
+          ...new Set(usersQuery.rows.map((row) => row.user_id)),
+        ];
+
+        for (const receiverId of recipientIds) {
           await pool.query(
             `INSERT INTO notifications (report_id, receiver_id, message, is_read, created_at)
              VALUES ($1, $2, $3, false, NOW())`,
-            [newReportId, row.user_id, alertBody],
+            [newReportId, receiverId, alertBody],
           );
         }
         console.log(
@@ -238,7 +256,13 @@ export const createReport = async (req, res) => {
         report: reportData,
       });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (uploadedFile) {
+      await uploadedFile.delete({ ignoreNotFound: true }).catch((cleanupError) => {
+        console.error("No se pudo limpiar la imagen del reporte:", cleanupError);
+      });
+    }
+    console.error("Error creando reporte:", err);
+    res.status(500).json({ message: "No se pudo crear el reporte." });
   }
 };
 
@@ -246,6 +270,7 @@ export const createReport = async (req, res) => {
 // EMERGENCIA REAL (activa sirena + llamada Twilio)
 // =============================================
 export const triggerEmergency = async (req, res) => {
+  let evidenceFile = null;
   let cooldownClaimed = false;
   let emergencyRecorded = false;
   let cooldownUserId = null;
@@ -339,9 +364,10 @@ export const triggerEmergency = async (req, res) => {
     if (req.file) {
       try {
         const bucket = admin.storage().bucket();
-        const safeName = req.file.originalname.replace(/\s/g, '_');
+        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
         const fileName = `emergencias/evidencia_${Date.now()}_${safeName}`;
         const file = bucket.file(fileName);
+        evidenceFile = file;
 
         // 🟢 Generamos un token nativo de Firebase
         const token = crypto.randomUUID();
@@ -390,11 +416,11 @@ export const triggerEmergency = async (req, res) => {
 
     // Notificaciones push a vecinos
     const usersQuery = await pool.query(
-      `SELECT user_id, fcm_token FROM users 
-       WHERE neighborhood_id = $1
-         AND fcm_token IS NOT NULL
-         AND btrim(fcm_token) <> ''
-         AND user_id != $2`,
+      `SELECT u.user_id, pt.fcm_token
+       FROM user_push_tokens pt
+       INNER JOIN users u ON u.user_id = pt.user_id
+       WHERE u.neighborhood_id = $1
+         AND u.user_id != $2`,
       [neighborhood_id, user_id],
     );
 
@@ -433,7 +459,7 @@ export const triggerEmergency = async (req, res) => {
       };
 
       try {
-        const invalidTokenUserIds = new Set();
+        const invalidTokens = new Set();
 
         for (let i = 0; i < tokens.length; i += 500) {
           const chunkRows = usersQuery.rows.slice(i, i + 500);
@@ -451,19 +477,18 @@ export const triggerEmergency = async (req, res) => {
             addErrorCode(delivery.push.error_codes, errorCode);
 
             if (INVALID_FCM_ERROR_CODES.has(errorCode)) {
-              invalidTokenUserIds.add(chunkRows[index].user_id);
+              invalidTokens.add(chunkRows[index].fcm_token);
             }
           });
         }
 
-        if (invalidTokenUserIds.size > 0) {
+        if (invalidTokens.size > 0) {
           await pool.query(
-            `UPDATE users
-             SET fcm_token = NULL
-             WHERE user_id = ANY($1::int[])`,
-            [[...invalidTokenUserIds]],
+            `DELETE FROM user_push_tokens
+             WHERE fcm_token = ANY($1::text[])`,
+            [[...invalidTokens]],
           );
-          delivery.push.invalidated = invalidTokenUserIds.size;
+          delivery.push.invalidated = invalidTokens.size;
         }
 
         delivery.push.status =
@@ -535,10 +560,15 @@ export const triggerEmergency = async (req, res) => {
       .json({ message: "Emergencia activada correctamente", delivery });
   } catch (err) {
     if (cooldownClaimed && !emergencyRecorded) {
-      releaseEmergencyCooldown(cooldownUserId, cooldownNeighborhoodId);
+      await releaseEmergencyCooldown(cooldownUserId, cooldownNeighborhoodId);
+    }
+    if (evidenceFile && !emergencyRecorded) {
+      await evidenceFile.delete({ ignoreNotFound: true }).catch((cleanupError) => {
+        console.error("No se pudo limpiar la evidencia de emergencia:", cleanupError);
+      });
     }
     console.error("Error en triggerEmergency:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "No se pudo activar la emergencia." });
   }
 };
 
@@ -587,7 +617,7 @@ export const getAllReports = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -620,7 +650,7 @@ export const getNeighborhoodReports = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -639,6 +669,6 @@ export const getMyReports = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };

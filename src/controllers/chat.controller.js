@@ -27,7 +27,7 @@ export const getNeighborhoodMessages = async (req, res) => {
 
     res.json(q.rows.reverse()); // para que salga de antiguo->nuevo
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -43,7 +43,8 @@ export const uploadChatImage = async (req, res) => {
     }
 
     const bucket = admin.storage().bucket();
-    const fileName = `chat_images/chat_${Date.now()}_${req.file.originalname}`;
+    const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const fileName = `chat_images/chat_${Date.now()}_${safeName}`;
     const file = bucket.file(fileName);
 
     await file.save(req.file.buffer, {

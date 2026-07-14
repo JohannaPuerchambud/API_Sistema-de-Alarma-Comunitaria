@@ -4,6 +4,23 @@ import jwt from "jsonwebtoken";
 import { pool } from "./config/db.js";
 import { getCurrentUser } from "./services/current-user.service.js";
 
+const MAX_CHAT_MESSAGE_LENGTH = 2000;
+const CHAT_RATE_WINDOW_MS = 10_000;
+const CHAT_RATE_LIMIT = 10;
+
+const isAllowedChatImageUrl = (value) => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "firebasestorage.googleapis.com" &&
+      url.pathname.startsWith("/v0/b/")
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const initSocket = (httpServer) => {
   const allowedOrigins = new Set([
     "https://app-sistema-de-alarma-comunitaria.onrender.com",
@@ -19,6 +36,7 @@ export const initSocket = (httpServer) => {
       origin: [...allowedOrigins],
       methods: ["GET", "POST"],
     },
+    maxHttpBufferSize: 1_000_000,
   });
 
   io.use(async (socket, next) => {
@@ -78,11 +96,36 @@ export const initSocket = (httpServer) => {
       socket.emit("error_message", "No se pudo cargar el historial.");
     }
 
+    const recentMessageTimes = [];
+
     socket.on("send_message", async (payload) => {
-      const text = (payload?.message || "").trim();
-      const imageUrl = (payload?.image_url || "").trim() || null;
+      const text = String(payload?.message || "").trim();
+      const imageUrl = String(payload?.image_url || "").trim() || null;
 
       if (!text && !imageUrl) return;
+
+      if (text.length > MAX_CHAT_MESSAGE_LENGTH) {
+        socket.emit("error_message", "El mensaje no puede superar 2000 caracteres.");
+        return;
+      }
+
+      if (imageUrl && !isAllowedChatImageUrl(imageUrl)) {
+        socket.emit("error_message", "La URL de imagen no es válida.");
+        return;
+      }
+
+      const now = Date.now();
+      while (
+        recentMessageTimes.length > 0 &&
+        recentMessageTimes[0] <= now - CHAT_RATE_WINDOW_MS
+      ) {
+        recentMessageTimes.shift();
+      }
+      if (recentMessageTimes.length >= CHAT_RATE_LIMIT) {
+        socket.emit("error_message", "Estás enviando mensajes demasiado rápido.");
+        return;
+      }
+      recentMessageTimes.push(now);
 
       try {
         const currentUser = await getCurrentUser(id);

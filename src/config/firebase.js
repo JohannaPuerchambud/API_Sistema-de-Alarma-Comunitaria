@@ -1,10 +1,8 @@
-import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { cert, applicationDefault, initializeApp } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
+import { getStorage } from "firebase-admin/storage";
 
 const loadServiceAccount = () => {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
@@ -19,20 +17,33 @@ const loadServiceAccount = () => {
     return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   }
 
-  const keyPath =
-    process.env.FIREBASE_SERVICE_ACCOUNT_PATH ||
-    path.join(__dirname, "firebase-key.json");
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    const keyPath = path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
+    return JSON.parse(fs.readFileSync(keyPath, "utf-8"));
+  }
 
-  return JSON.parse(fs.readFileSync(keyPath, "utf-8"));
+  return null;
 };
 
 const serviceAccount = loadServiceAccount();
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+if (!serviceAccount && process.env.NODE_ENV !== "test") {
+  throw new Error(
+    "Firebase no configurado. Define FIREBASE_SERVICE_ACCOUNT_BASE64, " +
+      "FIREBASE_SERVICE_ACCOUNT_JSON o FIREBASE_SERVICE_ACCOUNT_PATH.",
+  );
+}
+
+const firebaseApp = initializeApp({
+  credential: serviceAccount ? cert(serviceAccount) : applicationDefault(),
   storageBucket:
     process.env.FIREBASE_STORAGE_BUCKET ||
     "alarmacomunitaria-utn-5e6be.firebasestorage.app",
 });
+
+const admin = {
+  messaging: () => getMessaging(firebaseApp),
+  storage: () => getStorage(firebaseApp),
+};
 
 export default admin;

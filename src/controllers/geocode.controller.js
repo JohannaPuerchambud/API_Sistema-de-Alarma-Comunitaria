@@ -8,6 +8,7 @@ export const searchGeocode = async (req, res) => {
       `format=json&limit=5&addressdetails=1&q=${encodeURIComponent(q)}`;
 
     const response = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
       headers: {
         "User-Agent": "AlarmaComunitariaWeb/1.0 (contacto: admin@local.app)",
         "Accept-Language": "es",

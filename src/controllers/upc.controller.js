@@ -6,7 +6,7 @@ export const getUpcs = async (req, res) => {
     const { rows } = await pool.query(query);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -21,7 +21,7 @@ export const getUpcById = async (req, res) => {
     }
     res.json(rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -45,7 +45,7 @@ export const createUpc = async (req, res) => {
     ]);
     res.status(201).json(rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -76,7 +76,7 @@ export const updateUpc = async (req, res) => {
     }
     res.json(rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -100,6 +100,6 @@ export const deleteUpc = async (req, res) => {
           "No se puede eliminar la UPC porque hay barrios vinculados a ella.",
       });
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };

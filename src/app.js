@@ -13,6 +13,7 @@ import { upcRoutes } from "./routes/upc.routes.js";
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", 1);
 
 const defaultAllowedOrigins = [
   "https://app-sistema-de-alarma-comunitaria.onrender.com",
@@ -37,7 +38,7 @@ app.use(
     },
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -63,8 +64,9 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ message: err.message });
   }
 
-  res.status(err.status || 500).json({
-    message: err.message || "Error interno del servidor.",
+  const status = err.status || 500;
+  res.status(status).json({
+    message: status >= 500 ? "Error interno del servidor." : err.message,
   });
 });
 

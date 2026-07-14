@@ -48,15 +48,16 @@ export const register = async (req, res) => {
     if (error.code === "23505") {
       return res.status(409).json({ message: "El email ya está registrado." });
     }
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return res
         .status(400)
         .json({ message: "Email y contraseña son obligatorios." });
@@ -67,20 +68,20 @@ export const login = async (req, res) => {
       SELECT u.*, n.name AS neighborhood_name 
       FROM users u 
       LEFT JOIN neighborhoods n ON u.neighborhood_id = n.neighborhood_id 
-      WHERE u.email = $1
+      WHERE LOWER(u.email) = $1
     `,
-      [email],
+      [normalizedEmail],
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return res.status(401).json({ message: "Credenciales incorrectas" });
     }
 
     const user = result.rows[0];
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!validPassword) {
-      return res.status(401).json({ message: "Contraseña incorrecta" });
+      return res.status(401).json({ message: "Credenciales incorrectas" });
     }
 
     const token = jwt.sign(
@@ -109,6 +110,6 @@ export const login = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };

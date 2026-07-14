@@ -40,7 +40,7 @@ export const getNeighborhoods = async (req, res) => {
     const { rows } = await pool.query(query, values);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -73,7 +73,7 @@ export const getNeighborhoodById = async (req, res) => {
     }
     res.json(rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -100,7 +100,7 @@ export const createNeighborhood = async (req, res) => {
     ]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -144,7 +144,7 @@ export const updateNeighborhood = async (req, res) => {
         .status(400)
         .json({ error: 'Formato de "boundary" (JSONB) inválido.' });
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -169,7 +169,7 @@ export const deleteNeighborhood = async (req, res) => {
           "No se puede eliminar el barrio porque tiene usuarios asignados.",
       });
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -191,7 +191,7 @@ export const getNeighborhoodAdmin = async (req, res) => {
     // Devuelve null si no hay representante asignado (válido en front)
     res.json(rows.length > 0 ? rows[0] : null);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -204,38 +204,74 @@ export const getNeighborhoodAdmin = async (req, res) => {
  * No crea ningún campo nuevo en neighborhoods.
  */
 export const setNeighborhoodAdmin = async (req, res) => {
-  const { id } = req.params; // neighborhood_id
+  const { id } = req.params;
   const { admin_user_id } = req.body;
+  const client = await pool.connect();
 
   try {
-    // 1. Desvincular el admin previo de este barrio (si existe)
-    await pool.query(
-      `UPDATE users SET neighborhood_id = NULL
-       WHERE role_id = 2 AND neighborhood_id = $1`,
+    await client.query("BEGIN");
+
+    const neighborhood = await client.query(
+      "SELECT neighborhood_id FROM neighborhoods WHERE neighborhood_id = $1 FOR UPDATE",
       [id],
     );
+    if (neighborhood.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Barrio no encontrado." });
+    }
 
-    if (admin_user_id) {
-      // 2. Verificar que el usuario existe y tiene role_id = 2
-      const check = await pool.query(
-        `SELECT user_id FROM users WHERE user_id = $1 AND role_id = 2`,
+    if (admin_user_id != null) {
+      const candidate = await client.query(
+        "SELECT user_id FROM users WHERE user_id = $1 AND role_id = 2 FOR UPDATE",
         [admin_user_id],
       );
-      if (check.rows.length === 0) {
+      if (candidate.rows.length === 0) {
+        await client.query("ROLLBACK");
         return res.status(404).json({
           message: "Usuario no encontrado o no tiene rol Admin Barrio.",
         });
       }
+    }
 
-      // 3. Asignar el nuevo admin al barrio
-      await pool.query(
-        `UPDATE users SET neighborhood_id = $1 WHERE user_id = $2`,
+    const previous = await client.query(
+      `SELECT user_id
+       FROM users
+       WHERE role_id = 2 AND neighborhood_id = $1
+       FOR UPDATE`,
+      [id],
+    );
+
+    await client.query(
+      `UPDATE users
+       SET neighborhood_id = NULL
+       WHERE role_id = 2 AND neighborhood_id = $1`,
+      [id],
+    );
+
+    if (admin_user_id != null) {
+      await client.query(
+        "UPDATE users SET neighborhood_id = $1 WHERE user_id = $2",
         [id, admin_user_id],
       );
     }
 
+    await client.query("COMMIT");
+
+    const io = req.app?.get?.("io");
+    const affectedIds = new Set([
+      ...previous.rows.map((row) => row.user_id),
+      ...(admin_user_id == null ? [] : [admin_user_id]),
+    ]);
+    for (const userId of affectedIds) {
+      io?.in(`user_${userId}`).disconnectSockets(true);
+    }
+
     res.json({ message: "Representante actualizado correctamente." });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Error actualizando representante:", err);
+    res.status(500).json({ message: "No se pudo actualizar el representante." });
+  } finally {
+    client.release();
   }
 };

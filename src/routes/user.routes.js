@@ -1,6 +1,7 @@
 import express from "express";
 import {
   saveFcmToken,
+  deleteFcmToken,
   getUsers,
   getUserById,
   createUser,
@@ -18,6 +19,7 @@ import {
 const router = express.Router();
 
 router.post("/fcm-token", verifyToken, onlyUser, saveFcmToken);
+router.delete("/fcm-token", verifyToken, onlyUser, deleteFcmToken);
 
 router.get("/admins", verifyToken, onlyAdminGeneral, getAdmins);
 router.get("/", verifyToken, adminGeneralOrBarr, getUsers);

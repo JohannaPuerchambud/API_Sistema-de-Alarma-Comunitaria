@@ -52,7 +52,7 @@ export const getUsers = async (req, res) => {
     const { rows } = await pool.query(query, values);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -87,7 +87,7 @@ export const getUserById = async (req, res) => {
     }
     res.json(target);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -174,7 +174,7 @@ export const createUser = async (req, res) => {
     if (err.code === "23505") {
       return res.status(409).json({ message: "El email ya está registrado." });
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -306,7 +306,7 @@ export const updateUser = async (req, res) => {
     if (err.code === "23505") {
       return res.status(409).json({ message: "El email ya está registrado." });
     }
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -337,7 +337,7 @@ export const deleteUser = async (req, res) => {
     req.app?.get?.("io")?.in(`user_${id}`).disconnectSockets(true);
     res.json({ message: "Usuario eliminado correctamente" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
 
@@ -345,23 +345,47 @@ export const deleteUser = async (req, res) => {
 export const saveFcmToken = async (req, res) => {
   try {
     const { id } = req.user;
-    const { fcm_token } = req.body;
+    const fcmToken = String(req.body.fcm_token || "").trim();
 
-    if (!fcm_token) {
-      return res.status(400).json({ message: "Token requerido" });
+    if (!fcmToken || fcmToken.length > 4096) {
+      return res.status(400).json({ message: "Token FCM inválido." });
     }
 
-    await pool.query("UPDATE users SET fcm_token = $1 WHERE user_id = $2", [
-      fcm_token,
-      id,
-    ]);
+    await pool.query(
+      `INSERT INTO user_push_tokens (fcm_token, user_id, created_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW())
+       ON CONFLICT (fcm_token)
+       DO UPDATE SET user_id = EXCLUDED.user_id, updated_at = NOW()`,
+      [fcmToken, id],
+    );
 
     res.json({ message: "Token FCM actualizado correctamente" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Error guardando token FCM:", err);
+    res.status(500).json({ message: "No se pudo guardar el token FCM." });
   }
 };
 
+export const deleteFcmToken = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const fcmToken = String(req.body.fcm_token || "").trim();
+
+    if (!fcmToken || fcmToken.length > 4096) {
+      return res.status(400).json({ message: "Token FCM inválido." });
+    }
+
+    await pool.query(
+      "DELETE FROM user_push_tokens WHERE user_id = $1 AND fcm_token = $2",
+      [id, fcmToken],
+    );
+
+    res.json({ message: "Token FCM eliminado correctamente" });
+  } catch (err) {
+    console.error("Error eliminando token FCM:", err);
+    res.status(500).json({ message: "No se pudo eliminar el token FCM." });
+  }
+};
 /**
  * GET /api/users/admins
  * Devuelve todos los usuarios con role_id = 2 (Admins de Barrio)
@@ -386,6 +410,6 @@ export const getAdmins = async (req, res) => {
     `);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: "Error interno del servidor." });
   }
 };
