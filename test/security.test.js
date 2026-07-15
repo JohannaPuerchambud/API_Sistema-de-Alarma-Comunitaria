@@ -15,6 +15,8 @@ const { triggerEmergency } = await import(
   "../src/controllers/report.controller.js"
 );
 const { isAllowedChatImageUrl } = await import("../src/socket.js");
+const { normalizeStorageBucket } = await import("../src/config/firebase.js");
+const { getNeighborhoodPushRecipients } = await import("../src/services/push-token.service.js");
 const { updateNeighborhoodUsers, setNeighborhoodAdmin } = await import("../src/controllers/neighborhood.controller.js");
 const { claimEmergencyCooldown, releaseEmergencyCooldown } = await import(
   "../src/services/emergency-cooldown.service.js"
@@ -407,4 +409,62 @@ test("el chat rechaza imágenes externas y buckets ajenos", () => {
     ),
     false,
   );
+});
+test("normaliza formatos comunes del bucket Firebase", () => {
+  assert.equal(
+    normalizeStorageBucket(
+      "gs://alarmacomunitaria-utn-5e6be.firebasestorage.app/",
+    ),
+    "alarmacomunitaria-utn-5e6be.firebasestorage.app",
+  );
+  assert.equal(
+    normalizeStorageBucket(
+      "https://firebasestorage.googleapis.com/v0/b/alarmacomunitaria-utn-5e6be.firebasestorage.app/o/",
+    ),
+    "alarmacomunitaria-utn-5e6be.firebasestorage.app",
+  );
+});
+
+test("el cooldown usa memoria si la tabla auxiliar no existe", async () => {
+  const originalQuery = pool.query;
+  pool.query = async () => {
+    const error = new Error("relation does not exist");
+    error.code = "42P01";
+    throw error;
+  };
+
+  try {
+    const first = await claimEmergencyCooldown(1201, 91);
+    const second = await claimEmergencyCooldown(1201, 91);
+    assert.equal(first, 0);
+    assert.ok(second > 0);
+  } finally {
+    await releaseEmergencyCooldown(1201, 91);
+    pool.query = originalQuery;
+  }
+});
+
+test("los tokens push usan users.fcm_token si falta la tabla auxiliar", async () => {
+  const originalQuery = pool.query;
+  let attempts = 0;
+  pool.query = async (sql) => {
+    attempts += 1;
+    if (attempts === 1) {
+      const error = new Error("relation does not exist");
+      error.code = "42P01";
+      throw error;
+    }
+
+    assert.match(String(sql), /FROM users/);
+    return { rows: [{ user_id: 77, fcm_token: "token-compatible" }] };
+  };
+
+  try {
+    const result = await getNeighborhoodPushRecipients(12, 99);
+    assert.deepEqual(result.rows, [
+      { user_id: 77, fcm_token: "token-compatible" },
+    ]);
+  } finally {
+    pool.query = originalQuery;
+  }
 });

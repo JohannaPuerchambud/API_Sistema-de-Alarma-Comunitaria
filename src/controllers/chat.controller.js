@@ -1,10 +1,5 @@
-import crypto from "crypto";
-
 import { pool } from "../config/db.js";
-import admin from "../config/firebase.js";
-
-const firebaseDownloadUrl = (bucketName, fileName, token) =>
-  `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(fileName)}?alt=media&token=${token}`;
+import { uploadImageToFirebase } from "../services/firebase-storage.service.js";
 
 export const getNeighborhoodMessages = async (req, res) => {
   try {
@@ -52,27 +47,22 @@ export const uploadChatImage = async (req, res) => {
         .json({ message: "No se recibió ninguna imagen." });
     }
 
-    const bucket = admin.storage().bucket();
-    const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const fileName = `chat_images/chat_${Date.now()}_${safeName}`;
-    const downloadToken = crypto.randomUUID();
-    const file = bucket.file(fileName);
-
-    await file.save(req.file.buffer, {
-      metadata: {
-        contentType: req.file.mimetype,
-        cacheControl: "private, max-age=3600",
-        metadata: {
-          firebaseStorageDownloadTokens: downloadToken,
-        },
-      },
+    const result = await uploadImageToFirebase({
+      upload: req.file,
+      folder: "chat_images",
+      prefix: "chat",
     });
 
     res.status(200).json({
-      image_url: firebaseDownloadUrl(bucket.name, fileName, downloadToken),
+      image_url: result.imageUrl,
+      access_method: result.accessMethod,
     });
   } catch (error) {
     console.error("Error subiendo imagen del chat:", error);
-    res.status(500).json({ message: "Error al subir la imagen." });
+    res.status(503).json({
+      message:
+        "No se pudo guardar la imagen. Puedes continuar enviando mensajes de texto.",
+      code: error.code || "storage_upload_failed",
+    });
   }
 };

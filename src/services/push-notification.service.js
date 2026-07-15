@@ -1,5 +1,8 @@
 import admin from "../config/firebase.js";
-import { pool } from "../config/db.js";
+import {
+  deleteInvalidPushTokens,
+  getNeighborhoodPushRecipients,
+} from "./push-token.service.js";
 
 const INVALID_FCM_ERROR_CODES = new Set([
   "messaging/invalid-registration-token",
@@ -19,13 +22,9 @@ export const sendNeighborhoodPush = async ({
   body,
   data = {},
 }) => {
-  const recipients = await pool.query(
-    `SELECT u.user_id, pt.fcm_token
-     FROM user_push_tokens pt
-     INNER JOIN users u ON u.user_id = pt.user_id
-     WHERE u.neighborhood_id = $1
-       AND ($2::int IS NULL OR u.user_id != $2)`,
-    [neighborhoodId, excludeUserId ?? null],
+  const recipients = await getNeighborhoodPushRecipients(
+    neighborhoodId,
+    excludeUserId,
   );
 
   const delivery = {
@@ -50,16 +49,10 @@ export const sendNeighborhoodPush = async ({
       ),
       android: {
         priority: "high",
-        notification: {
-          sound: "default",
-        },
+        notification: { sound: "default" },
       },
       apns: {
-        payload: {
-          aps: {
-            sound: "default",
-          },
-        },
+        payload: { aps: { sound: "default" } },
       },
       tokens: chunk.map((row) => row.fcm_token),
     });
@@ -79,11 +72,7 @@ export const sendNeighborhoodPush = async ({
   }
 
   if (invalidTokens.size > 0) {
-    await pool.query(
-      `DELETE FROM user_push_tokens
-       WHERE fcm_token = ANY($1::text[])`,
-      [[...invalidTokens]],
-    );
+    await deleteInvalidPushTokens([...invalidTokens]);
     delivery.invalidated = invalidTokens.size;
   }
 

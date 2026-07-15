@@ -6,7 +6,11 @@ import {
   claimEmergencyCooldown,
   releaseEmergencyCooldown,
 } from "../services/emergency-cooldown.service.js";
-import crypto from "crypto"; // 🟢 IMPORTANTE: Añadimos crypto para generar el token de la imagen
+import { uploadImageToFirebase } from "../services/firebase-storage.service.js";
+import {
+  deleteInvalidPushTokens,
+  getNeighborhoodPushRecipients,
+} from "../services/push-token.service.js";
 
 const INVALID_FCM_ERROR_CODES = new Set([
   "messaging/invalid-registration-token",
@@ -114,39 +118,30 @@ export const createReport = async (req, res) => {
 
     // ✅ Subir imagen a Firebase Storage sin getSignedUrl
     let image_url = null;
+    let imageUploadWarning = req.uploadWarning || null;
 
     if (req.file) {
       try {
-        const bucket = admin.storage().bucket();
-        // Limpiamos los espacios del nombre del archivo por seguridad
-        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const fileName = `reports/evidencia_${Date.now()}_${safeName}`;
-        const file = bucket.file(fileName);
-        uploadedFile = file;
-
-        // 🟢 Generamos un token nativo de Firebase
-        const token = crypto.randomUUID();
-
-        await file.save(req.file.buffer, {
-          metadata: {
-            contentType: req.file.mimetype,
-            metadata: {
-              firebaseStorageDownloadTokens: token // Le inyectamos el token
-            }
-          },
+        const uploadResult = await uploadImageToFirebase({
+          upload: req.file,
+          folder: "reports",
+          prefix: "evidencia",
         });
-
-        // 🟢 Construimos la URL pública manualmente (Nunca falla)
-        image_url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${token}`;
-        
-      } catch (uploadErr) {
-        console.error("Error subiendo imagen a Firebase Storage:", uploadErr);
-        return res
-          .status(500)
-          .json({ message: "Error al subir la imagen de evidencia." });
+        image_url = uploadResult.imageUrl;
+        uploadedFile = uploadResult.storageFile;
+      } catch (uploadError) {
+        imageUploadWarning = {
+          code: "evidence_upload_failed",
+          message:
+            "El reporte se registró, pero Firebase Storage no aceptó la evidencia.",
+        };
+        console.error("Evidencia omitida del reporte:", {
+          code: uploadError.code,
+          message: uploadError.message,
+          details: uploadError.details,
+        });
       }
     }
-
     const avisoFoto = image_url ? "\n📸 Evidencia adjunta" : "";
     const alertMessage = `⚠️ ACTIVIDAD SOSPECHOSA ⚠️
 Motivo: ${String(title).trim()}
@@ -195,16 +190,21 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
       });
     }
 
-    // Notificaciones push a vecinos
-    const usersQuery = await pool.query(
-      `SELECT u.user_id, pt.fcm_token
-       FROM user_push_tokens pt
-       INNER JOIN users u ON u.user_id = pt.user_id
-       WHERE u.neighborhood_id = $1
-         AND u.user_id != $2`,
-      [neighborhood_id, user_id],
-    );
-
+    // Las notificaciones son complementarias y nunca deben bloquear el registro.
+    let usersQuery = { rows: [] };
+    let pushLookupError = null;
+    try {
+      usersQuery = await getNeighborhoodPushRecipients(
+        neighborhood_id,
+        user_id,
+      );
+    } catch (pushError) {
+      pushLookupError = pushError;
+      console.error(
+        "No se pudieron consultar destinatarios push; el registro principal continuará:",
+        pushError,
+      );
+    }
     const tokens = usersQuery.rows.map((row) => row.fcm_token);
 
     if (tokens.length > 0) {
@@ -253,12 +253,20 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
     const reportData = rows[0];
     reportData.address = userResult.rows[0]?.address || null;
 
-    res
-      .status(201)
-      .json({
-        message: "Reporte de actividad sospechosa creado",
-        report: reportData,
-      });
+    res.status(201).json({
+      message: "Reporte de actividad sospechosa creado",
+      report: reportData,
+      warnings: [
+        imageUploadWarning,
+        pushLookupError
+          ? {
+              code: "push_unavailable",
+              message:
+                "El reporte se registró, pero no se pudieron procesar las notificaciones.",
+            }
+          : null,
+      ].filter(Boolean),
+    });
   } catch (err) {
     if (uploadedFile) {
       await uploadedFile.delete({ ignoreNotFound: true }).catch((cleanupError) => {
@@ -373,35 +381,30 @@ export const triggerEmergency = async (req, res) => {
 
     // ✅ Subir imagen de emergencia a Firebase Storage sin getSignedUrl
     let evidence_url = null;
+    let evidenceUploadWarning = req.uploadWarning || null;
 
     if (req.file) {
       try {
-        const bucket = admin.storage().bucket();
-        const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const fileName = `emergencias/evidencia_${Date.now()}_${safeName}`;
-        const file = bucket.file(fileName);
-        evidenceFile = file;
-
-        // 🟢 Generamos un token nativo de Firebase
-        const token = crypto.randomUUID();
-
-        await file.save(req.file.buffer, {
-          metadata: { 
-            contentType: req.file.mimetype,
-            metadata: {
-              firebaseStorageDownloadTokens: token // Le inyectamos el token
-            }
-          },
+        const uploadResult = await uploadImageToFirebase({
+          upload: req.file,
+          folder: "emergencias",
+          prefix: "evidencia",
         });
-
-        // 🟢 Construimos la URL pública manualmente
-        evidence_url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${token}`;
-        
-      } catch (uploadErr) {
-        console.error("Error subiendo imagen de emergencia:", uploadErr);
+        evidence_url = uploadResult.imageUrl;
+        evidenceFile = uploadResult.storageFile;
+      } catch (uploadError) {
+        evidenceUploadWarning = {
+          code: "evidence_upload_failed",
+          message:
+            "La emergencia se registró sin evidencia porque Firebase Storage rechazó la imagen.",
+        };
+        console.error("Evidencia omitida de la emergencia:", {
+          code: uploadError.code,
+          message: uploadError.message,
+          details: uploadError.details,
+        });
       }
     }
-
     const evidenceTag = evidence_url ? "" : "\n[NO_EVIDENCE]";
     const alertMessage = `🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: ${String(justification).trim()}\nVecino: ${name} ${last_name || ""}${addressText}${locationTag}${evidenceTag}`;
 
@@ -427,29 +430,48 @@ export const triggerEmergency = async (req, res) => {
       });
     }
 
-    // Notificaciones push a vecinos
-    const usersQuery = await pool.query(
-      `SELECT u.user_id, pt.fcm_token
-       FROM user_push_tokens pt
-       INNER JOIN users u ON u.user_id = pt.user_id
-       WHERE u.neighborhood_id = $1
-         AND u.user_id != $2`,
-      [neighborhood_id, user_id],
-    );
-
+    // Las notificaciones son complementarias y nunca deben bloquear el registro.
+    let usersQuery = { rows: [] };
+    let pushLookupError = null;
+    try {
+      usersQuery = await getNeighborhoodPushRecipients(
+        neighborhood_id,
+        user_id,
+      );
+    } catch (pushError) {
+      pushLookupError = pushError;
+      console.error(
+        "No se pudieron consultar destinatarios push; el registro principal continuará:",
+        pushError,
+      );
+    }
     const tokens = usersQuery.rows.map((row) => row.fcm_token);
     const delivery = {
       chat: {
         created: true,
         message_id: chatResult.rows[0].message_id,
       },
+      evidence: {
+        requested: Boolean(req.file || req.uploadWarning),
+        attached: Boolean(evidence_url),
+        status: req.file
+          ? evidence_url
+            ? "uploaded"
+            : "failed"
+          : "not_provided",
+        warning: evidenceUploadWarning,
+      },
       push: {
         attempted: tokens.length,
         success: 0,
         failure: 0,
         invalidated: 0,
-        error_codes: {},
-        status: tokens.length > 0 ? "pending" : "no_recipients",
+        error_codes: pushLookupError ? { push_token_lookup_failed: 1 } : {},
+        status: pushLookupError
+          ? "unavailable"
+          : tokens.length > 0
+            ? "pending"
+            : "no_recipients",
       },
       twilio: {
         attempted: false,
@@ -499,11 +521,7 @@ export const triggerEmergency = async (req, res) => {
         }
 
         if (invalidTokens.size > 0) {
-          await pool.query(
-            `DELETE FROM user_push_tokens
-             WHERE fcm_token = ANY($1::text[])`,
-            [[...invalidTokens]],
-          );
+          await deleteInvalidPushTokens([...invalidTokens]);
           delivery.push.invalidated = invalidTokens.size;
         }
 

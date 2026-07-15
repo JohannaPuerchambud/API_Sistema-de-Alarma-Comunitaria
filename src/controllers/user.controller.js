@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../config/db.js";
+import { deletePushToken, savePushToken } from "../services/push-token.service.js";
 
 const sameNeighborhood = (a, b) => Number(a) === Number(b);
 
@@ -351,17 +352,10 @@ export const saveFcmToken = async (req, res) => {
       return res.status(400).json({ message: "Token FCM inválido." });
     }
 
-    await pool.query(
-      `INSERT INTO user_push_tokens (fcm_token, user_id, created_at, updated_at)
-       VALUES ($1, $2, NOW(), NOW())
-       ON CONFLICT (fcm_token)
-       DO UPDATE SET user_id = EXCLUDED.user_id, updated_at = NOW()`,
-      [fcmToken, id],
-    );
-
+    await savePushToken(id, fcmToken);
     res.json({ message: "Token FCM actualizado correctamente" });
-  } catch (err) {
-    console.error("Error guardando token FCM:", err);
+  } catch (error) {
+    console.error("Error guardando token FCM:", error);
     res.status(500).json({ message: "No se pudo guardar el token FCM." });
   }
 };
@@ -375,14 +369,10 @@ export const deleteFcmToken = async (req, res) => {
       return res.status(400).json({ message: "Token FCM inválido." });
     }
 
-    await pool.query(
-      "DELETE FROM user_push_tokens WHERE user_id = $1 AND fcm_token = $2",
-      [id, fcmToken],
-    );
-
+    await deletePushToken(id, fcmToken);
     res.json({ message: "Token FCM eliminado correctamente" });
-  } catch (err) {
-    console.error("Error eliminando token FCM:", err);
+  } catch (error) {
+    console.error("Error eliminando token FCM:", error);
     res.status(500).json({ message: "No se pudo eliminar el token FCM." });
   }
 };

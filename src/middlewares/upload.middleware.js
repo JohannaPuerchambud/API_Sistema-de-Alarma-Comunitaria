@@ -1,23 +1,58 @@
-// middlewares/upload.middleware.js
 import multer from "multer";
 
-// Almacenar en memoria (no en disco) para luego subir a Firebase Storage
 const storage = multer.memoryStorage();
 
-// Filtrar solo imágenes
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+  const allowedMimes = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+  ];
+
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
-  } else {
-    cb(new Error("Solo se permiten imágenes (jpeg, png, webp, gif)."), false);
+    return;
   }
+
+  const error = new Error(
+    "La imagen no tiene un formato compatible (jpeg, png, webp o gif).",
+  );
+  error.code = "UNSUPPORTED_IMAGE_TYPE";
+  cb(error, false);
 };
 
-export const uploadImage = multer({
+const imageUpload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // Máximo 5 MB
+    fileSize: 5 * 1024 * 1024,
   },
-}).single("image"); // El campo se llamará "image" en el form-data
+}).single("image");
+
+export const uploadImage = (req, res, next) => {
+  imageUpload(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    req.file = null;
+    req.uploadWarning = {
+      code:
+        error instanceof multer.MulterError
+          ? error.code
+          : error.code || "IMAGE_REJECTED",
+      message:
+        error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE"
+          ? "La imagen fue omitida porque supera el límite de 5 MB."
+          : error.message || "La imagen fue omitida por tener un formato inválido.",
+    };
+
+    console.warn("Imagen opcional omitida antes del controlador:", {
+      code: req.uploadWarning.code,
+      message: req.uploadWarning.message,
+    });
+    next();
+  });
+};
