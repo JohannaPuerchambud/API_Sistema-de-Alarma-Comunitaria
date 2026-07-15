@@ -3,19 +3,35 @@ import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { pool } from "./config/db.js";
 import { getCurrentUser } from "./services/current-user.service.js";
+import { sendNeighborhoodPush } from "./services/push-notification.service.js";
 
 const MAX_CHAT_MESSAGE_LENGTH = 2000;
 const CHAT_RATE_WINDOW_MS = 10_000;
 const CHAT_RATE_LIMIT = 10;
 
-const isAllowedChatImageUrl = (value) => {
+const FIREBASE_STORAGE_BUCKET =
+  process.env.FIREBASE_STORAGE_BUCKET ||
+  "alarmacomunitaria-utn-5e6be.firebasestorage.app";
+
+export const isAllowedChatImageUrl = (value) => {
   try {
     const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
+    if (url.protocol !== "https:") return false;
+
+    const firebasePath =
+      `/v0/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o/`;
+    const isFirebaseDownload =
       url.hostname === "firebasestorage.googleapis.com" &&
-      url.pathname.startsWith("/v0/b/")
-    );
+      url.pathname.startsWith(firebasePath) &&
+      url.searchParams.get("alt") === "media" &&
+      Boolean(url.searchParams.get("token"));
+
+    const isLegacySignedUrl =
+      (url.hostname === "storage.googleapis.com" &&
+        url.pathname.startsWith(`/${FIREBASE_STORAGE_BUCKET}/`)) ||
+      (url.hostname === `${FIREBASE_STORAGE_BUCKET}.storage.googleapis.com`);
+
+    return isFirebaseDownload || isLegacySignedUrl;
   } catch {
     return false;
   }
@@ -160,6 +176,24 @@ export const initSocket = (httpServer) => {
         };
 
         io.to(room).emit("new_message", msg);
+
+        sendNeighborhoodPush({
+          neighborhoodId: neighborhood,
+          excludeUserId: id,
+          title: `Nuevo mensaje de ${socket.user.name}`,
+          body: text || "Foto enviada al chat",
+          data: {
+            type: "chat",
+            neighborhood_id: neighborhood,
+            message_id: rows[0].message_id,
+          },
+        })
+          .then((delivery) => {
+            console.log("Entrega push del chat:", delivery);
+          })
+          .catch((pushError) => {
+            console.error("Error enviando push del chat:", pushError);
+          });
       } catch (e) {
         socket.emit("error_message", "No se pudo enviar el mensaje.");
       }

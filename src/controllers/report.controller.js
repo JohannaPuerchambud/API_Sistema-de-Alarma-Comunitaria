@@ -62,8 +62,10 @@ const addErrorCode = (target, code, count = 1) => {
   target[key] = (target[key] || 0) + count;
 };
 
-const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE } = process.env;
-const TWILIO_FROM_NUMBER = normalizePhoneNumber(TWILIO_PHONE);
+const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+const TWILIO_FROM_NUMBER = normalizePhoneNumber(
+  process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_PHONE,
+);
 const twilioClient =
   TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -84,10 +86,10 @@ export const createReport = async (req, res) => {
       last_name,
     } = req.user;
 
-    if (Number(role) !== 3) {
+    if (![2, 3].includes(Number(role))) {
       return res
         .status(403)
-        .json({ message: "Solo el rol Usuario puede crear reportes." });
+        .json({ message: "Solo los miembros del barrio pueden crear reportes." });
     }
 
     const { title, description } = req.body;
@@ -214,6 +216,8 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
           title: alertTitle,
           body: alertBody,
         },
+        android: { priority: "high", notification: { sound: "default" } },
+        apns: { payload: { aps: { sound: "default" } } },
         tokens: tokens,
       };
 
@@ -285,10 +289,10 @@ export const triggerEmergency = async (req, res) => {
       last_name,
     } = req.user;
 
-    if (Number(role) !== 3) {
+    if (![2, 3].includes(Number(role))) {
       return res
         .status(403)
-        .json({ message: "Solo el rol Usuario puede activar emergencias." });
+        .json({ message: "Solo los miembros del barrio pueden activar emergencias." });
     }
 
     if (!neighborhood_id) {
@@ -331,6 +335,15 @@ export const triggerEmergency = async (req, res) => {
         TWILIO_FROM_NUMBER &&
         isE164PhoneNumber(TWILIO_FROM_NUMBER),
     );
+    const twilioConfigurationErrors = [
+      !TWILIO_ACCOUNT_SID ? "missing_account_sid" : null,
+      !TWILIO_AUTH_TOKEN ? "missing_auth_token" : null,
+      !TWILIO_FROM_NUMBER
+        ? "missing_from_number"
+        : !isE164PhoneNumber(TWILIO_FROM_NUMBER)
+          ? "invalid_from_number"
+          : null,
+    ].filter(Boolean);
     const neighborhoodName = neighborhoodQuery.rows[0].name;
 
     const userQuery = await pool.query(
@@ -441,6 +454,7 @@ export const triggerEmergency = async (req, res) => {
       twilio: {
         attempted: false,
         configured: twilioIsConfigured,
+        configuration_errors: twilioConfigurationErrors,
         status: hasAlarmNumber
           ? alarmNumberIsValid
             ? "pending"
@@ -455,6 +469,8 @@ export const triggerEmergency = async (req, res) => {
           title: "🚨 ¡EMERGENCIA en tu barrio!",
           body: `${name}: ${String(justification).trim()}`,
         },
+        android: { priority: "high", notification: { sound: "default" } },
+        apns: { payload: { aps: { sound: "default" } } },
         tokens: tokens,
       };
 

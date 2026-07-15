@@ -20,6 +20,7 @@ export const getUsers = async (req, res) => {
              u.last_name,
              u.email,
              u.phone,
+             u.address,
              u.role_id,
              u.neighborhood_id,
              u.home_lat,
@@ -35,6 +36,7 @@ export const getUsers = async (req, res) => {
              u.last_name,
              u.email,
              u.phone,
+             u.address,
              u.role_id,
              u.neighborhood_id,
              u.home_lat,
@@ -123,17 +125,21 @@ export const createUser = async (req, res) => {
       });
     }
 
-    if (role === 2 && !sameNeighborhood(neighborhood, neighborhood_id)) {
-      return res
-        .status(403)
-        .json({ message: "Solo puedes crear usuarios de tu barrio" });
-    }
-
-    if (role === 2 && Number(role_id ?? 3) !== 3) {
-      return res.status(403).json({
-        message: "Solo el Admin General puede crear administradores",
+    if (role === 2 && !neighborhood) {
+      return res.status(400).json({
+        message: "Tu cuenta de representante no tiene un barrio asignado.",
       });
     }
+
+    if (role === 2 && role_id != null && Number(role_id) !== 3) {
+      return res.status(403).json({
+        message: "Solo el Admin General puede crear administradores.",
+      });
+    }
+
+    const effectiveRoleId = role === 2 ? 3 : (role_id ?? 3);
+    const effectiveNeighborhoodId =
+      role === 2 ? neighborhood : (neighborhood_id ?? null);
 
     const hash = await bcrypt.hash(password, 10);
 
@@ -160,8 +166,8 @@ export const createUser = async (req, res) => {
         last_name ?? null,
         email,
         hash,
-        role_id ?? 3,
-        neighborhood_id ?? null,
+        effectiveRoleId,
+        effectiveNeighborhoodId,
         address ?? null,
         phone ?? null,
         home_lat ?? null,
@@ -217,21 +223,15 @@ export const updateUser = async (req, res) => {
       });
     }
 
-    if (
-      role === 2 &&
-      neighborhood_id &&
-      !sameNeighborhood(neighborhood, neighborhood_id)
-    ) {
-      return res
-        .status(403)
-        .json({ message: "No puedes cambiar el usuario a otro barrio" });
+    if (role === 2 && !neighborhood) {
+      return res.status(400).json({
+        message: "Tu cuenta de representante no tiene un barrio asignado.",
+      });
     }
 
-    if (role === 2 && Number(role_id) !== 3) {
-      return res
-        .status(403)
-        .json({ message: "Solo el Admin General puede asignar roles administrativos" });
-    }
+    const effectiveRoleId = role === 2 ? 3 : role_id;
+    const effectiveNeighborhoodId =
+      role === 2 ? neighborhood : (neighborhood_id ?? null);
 
     if (password && !isStrongPassword(password)) {
       return res.status(400).json({
@@ -256,8 +256,8 @@ export const updateUser = async (req, res) => {
       name,
       last_name ?? null,
       email,
-      role_id,
-      neighborhood_id ?? null,
+      effectiveRoleId,
+      effectiveNeighborhoodId,
       address ?? null,
       phone ?? null,
       home_lat ?? null,
@@ -272,8 +272,8 @@ export const updateUser = async (req, res) => {
         name,
         last_name ?? null,
         email,
-        role_id,
-        neighborhood_id ?? null,
+        effectiveRoleId,
+        effectiveNeighborhoodId,
         address ?? null,
         phone ?? null,
         home_lat ?? null,

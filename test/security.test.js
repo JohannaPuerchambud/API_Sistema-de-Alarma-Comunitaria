@@ -14,6 +14,7 @@ const { createUser, updateUser, deleteUser } = await import(
 const { triggerEmergency } = await import(
   "../src/controllers/report.controller.js"
 );
+const { isAllowedChatImageUrl } = await import("../src/socket.js");
 const { updateNeighborhoodUsers, setNeighborhoodAdmin } = await import("../src/controllers/neighborhood.controller.js");
 const { claimEmergencyCooldown, releaseEmergencyCooldown } = await import(
   "../src/services/emergency-cooldown.service.js"
@@ -376,4 +377,34 @@ test("la emergencia no llama a Twilio con un numero de alarma invalido", async (
     await releaseEmergencyCooldown(902, 78);
     pool.query = originalQuery;
   }
+});
+test("el chat acepta URLs persistentes del bucket Firebase configurado", () => {
+  assert.equal(
+    isAllowedChatImageUrl(
+      "https://firebasestorage.googleapis.com/v0/b/alarmacomunitaria-utn-5e6be.firebasestorage.app/o/chat_images%2Ffoto.jpg?alt=media&token=test-token",
+    ),
+    true,
+  );
+});
+
+test("el chat mantiene compatibilidad con URLs firmadas anteriores", () => {
+  assert.equal(
+    isAllowedChatImageUrl(
+      "https://storage.googleapis.com/alarmacomunitaria-utn-5e6be.firebasestorage.app/chat_images/foto.jpg?X-Goog-Signature=test",
+    ),
+    true,
+  );
+});
+
+test("el chat rechaza imágenes externas y buckets ajenos", () => {
+  assert.equal(
+    isAllowedChatImageUrl("https://example.com/foto.jpg"),
+    false,
+  );
+  assert.equal(
+    isAllowedChatImageUrl(
+      "https://firebasestorage.googleapis.com/v0/b/otro-bucket/o/foto.jpg?alt=media&token=test",
+    ),
+    false,
+  );
 });
