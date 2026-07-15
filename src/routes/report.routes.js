@@ -2,7 +2,7 @@
 import { Router } from "express";
 import {
   adminGeneralOrBarr,
-  onlyUser,
+  neighborhoodMember,
   verifyToken,
 } from "../middlewares/auth.middleware.js";
 import { uploadImage } from "../middlewares/upload.middleware.js";
@@ -19,11 +19,11 @@ export const reportRoutes = Router();
 reportRoutes.get("/", verifyToken, adminGeneralOrBarr, getAllReports);
 
 // ✅ Ahora acepta multipart/form-data con imagen opcional
-reportRoutes.post("/", verifyToken, onlyUser, uploadImage, createReport);
+reportRoutes.post("/", verifyToken, neighborhoodMember, uploadImage, createReport);
 
 // ✅ Endpoint de emergencia real (activa sirena) - ahora acepta imagen opcional
-reportRoutes.post("/emergency", verifyToken, onlyUser, uploadImage, triggerEmergency);
+reportRoutes.post("/emergency", verifyToken, neighborhoodMember, uploadImage, triggerEmergency);
 
-reportRoutes.get("/neighborhood", verifyToken, onlyUser, getNeighborhoodReports);
+reportRoutes.get("/neighborhood", verifyToken, neighborhoodMember, getNeighborhoodReports);
 
-reportRoutes.get("/mine", verifyToken, onlyUser, getMyReports);
+reportRoutes.get("/mine", verifyToken, neighborhoodMember, getMyReports);

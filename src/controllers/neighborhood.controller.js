@@ -173,6 +173,101 @@ export const deleteNeighborhood = async (req, res) => {
   }
 };
 
+/**
+ * Asigna o retira habitantes usando users.neighborhood_id.
+ * No crea relaciones ni columnas nuevas.
+ */
+export const updateNeighborhoodUsers = async (req, res) => {
+  const { id } = req.params;
+  const action = req.body.action === "remove" ? "remove" : "add";
+  const userIds = [
+    ...new Set(
+      (Array.isArray(req.body.user_ids) ? req.body.user_ids : [])
+        .map(Number)
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  ];
+
+  if (userIds.length === 0) {
+    return res.status(400).json({ message: "Selecciona al menos un usuario." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const neighborhood = await client.query(
+      "SELECT neighborhood_id FROM neighborhoods WHERE neighborhood_id = $1 FOR UPDATE",
+      [id],
+    );
+    if (neighborhood.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Barrio no encontrado." });
+    }
+
+    const candidates = await client.query(
+      `SELECT user_id, role_id, neighborhood_id
+       FROM users
+       WHERE user_id = ANY($1::int[])
+       FOR UPDATE`,
+      [userIds],
+    );
+    if (candidates.rows.length !== userIds.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Uno o más usuarios no existen." });
+    }
+    if (candidates.rows.some((user) => Number(user.role_id) === 1)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "El Admin General no puede asignarse a un barrio." });
+    }
+    if (action === "add" && candidates.rows.some((user) => Number(user.role_id) !== 3)) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: "Los representantes deben asignarse mediante la acción Designar representante.",
+      });
+    }
+
+    if (action === "remove") {
+      if (candidates.rows.some((user) => Number(user.role_id) === 2)) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          message: "Cambia primero el representante antes de retirarlo del barrio.",
+        });
+      }
+      await client.query(
+        `UPDATE users
+         SET neighborhood_id = NULL
+         WHERE user_id = ANY($1::int[])
+           AND neighborhood_id = $2`,
+        [userIds, id],
+      );
+    } else {
+      await client.query(
+        `UPDATE users
+         SET neighborhood_id = $1
+         WHERE user_id = ANY($2::int[])`,
+        [id, userIds],
+      );
+    }
+
+    await client.query("COMMIT");
+    const io = req.app?.get?.("io");
+    for (const userId of userIds) {
+      io?.in(`user_${userId}`).disconnectSockets(true);
+    }
+
+    res.json({
+      message: action === "remove" ? "Habitantes retirados correctamente." : "Habitantes asignados correctamente.",
+      user_ids: userIds,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Error actualizando habitantes del barrio:", err);
+    res.status(500).json({ message: "No se pudieron actualizar los habitantes." });
+  } finally {
+    client.release();
+  }
+};
 // ─── Representante del barrio ────────────────────────────────────────────────
 
 /**
@@ -205,7 +300,7 @@ export const getNeighborhoodAdmin = async (req, res) => {
  */
 export const setNeighborhoodAdmin = async (req, res) => {
   const { id } = req.params;
-  const { admin_user_id } = req.body;
+  const { admin_user_id, promote = false } = req.body;
   const client = await pool.connect();
 
   try {
@@ -222,13 +317,21 @@ export const setNeighborhoodAdmin = async (req, res) => {
 
     if (admin_user_id != null) {
       const candidate = await client.query(
-        "SELECT user_id FROM users WHERE user_id = $1 AND role_id = 2 FOR UPDATE",
+        "SELECT user_id, role_id FROM users WHERE user_id = $1 FOR UPDATE",
         [admin_user_id],
       );
       if (candidate.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({
-          message: "Usuario no encontrado o no tiene rol Admin Barrio.",
+        return res.status(404).json({ message: "Usuario no encontrado." });
+      }
+      const candidateRole = Number(candidate.rows[0].role_id);
+      if (candidateRole === 1 || (candidateRole === 3 && !promote)) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          message:
+            candidateRole === 1
+              ? "El Admin General no puede ser representante de un barrio."
+              : "Confirma la promoción del habitante a representante.",
         });
       }
     }
@@ -250,7 +353,7 @@ export const setNeighborhoodAdmin = async (req, res) => {
 
     if (admin_user_id != null) {
       await client.query(
-        "UPDATE users SET neighborhood_id = $1 WHERE user_id = $2",
+        "UPDATE users SET neighborhood_id = $1, role_id = 2 WHERE user_id = $2",
         [id, admin_user_id],
       );
     }

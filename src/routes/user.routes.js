@@ -13,13 +13,13 @@ import {
   verifyToken,
   onlyAdminGeneral,
   adminGeneralOrBarr,
-  onlyUser,
+  neighborhoodMember,
 } from "../middlewares/auth.middleware.js";
 
 const router = express.Router();
 
-router.post("/fcm-token", verifyToken, onlyUser, saveFcmToken);
-router.delete("/fcm-token", verifyToken, onlyUser, deleteFcmToken);
+router.post("/fcm-token", verifyToken, neighborhoodMember, saveFcmToken);
+router.delete("/fcm-token", verifyToken, neighborhoodMember, deleteFcmToken);
 
 router.get("/admins", verifyToken, onlyAdminGeneral, getAdmins);
 router.get("/", verifyToken, adminGeneralOrBarr, getUsers);

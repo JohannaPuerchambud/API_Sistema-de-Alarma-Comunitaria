@@ -7,13 +7,14 @@ process.env.NODE_ENV ||= "test";
 process.env.EMERGENCY_COOLDOWN_SECONDS = "60";
 
 const { pool } = await import("../src/config/db.js");
-const { verifyToken } = await import("../src/middlewares/auth.middleware.js");
+const { verifyToken, neighborhoodMember } = await import("../src/middlewares/auth.middleware.js");
 const { createUser, updateUser, deleteUser } = await import(
   "../src/controllers/user.controller.js"
 );
 const { triggerEmergency } = await import(
   "../src/controllers/report.controller.js"
 );
+const { updateNeighborhoodUsers, setNeighborhoodAdmin } = await import("../src/controllers/neighborhood.controller.js");
 const { claimEmergencyCooldown, releaseEmergencyCooldown } = await import(
   "../src/services/emergency-cooldown.service.js"
 );
@@ -36,6 +37,107 @@ const createResponse = () => ({
   },
 });
 
+test("roles 2 y 3 pueden usar funciones comunitarias, pero el rol 1 no", () => {
+  for (const role of [2, 3]) {
+    const req = { user: { role } };
+    const res = createResponse();
+    let called = false;
+    neighborhoodMember(req, res, () => { called = true; });
+    assert.equal(called, true);
+    assert.equal(res.statusCode, 200);
+  }
+
+  const req = { user: { role: 1 } };
+  const res = createResponse();
+  let called = false;
+  neighborhoodMember(req, res, () => { called = true; });
+  assert.equal(called, false);
+  assert.equal(res.statusCode, 403);
+});
+test("la asignacion de habitantes reutiliza neighborhood_id dentro de una transaccion", async () => {
+  const originalConnect = pool.connect;
+  const queries = [];
+  const client = {
+    async query(sql, values = []) {
+      queries.push({ sql, values });
+      if (sql === "BEGIN" || sql === "COMMIT") return { rows: [] };
+      if (sql.includes("FROM neighborhoods")) return { rows: [{ neighborhood_id: 12 }] };
+      if (sql.includes("FROM users")) {
+        return {
+          rows: [
+            { user_id: 31, role_id: 3, neighborhood_id: null },
+            { user_id: 32, role_id: 3, neighborhood_id: null },
+          ],
+        };
+      }
+      if (sql.includes("UPDATE users")) return { rows: [] };
+      throw new Error(`Consulta inesperada: ${sql}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  try {
+    const res = createResponse();
+    await updateNeighborhoodUsers(
+      {
+        params: { id: 12 },
+        body: { action: "add", user_ids: [31, 32] },
+        app: { get: () => null },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.payload.user_ids, [31, 32]);
+    assert.equal(queries.some(({ sql }) => sql === "COMMIT"), true);
+    assert.equal(
+      queries.some(({ sql }) => sql.includes("SET neighborhood_id = $1")),
+      true,
+    );
+  } finally {
+    pool.connect = originalConnect;
+  }
+});
+test("promueve explicitamente un habitante a representante sin cambiar el esquema", async () => {
+  const originalConnect = pool.connect;
+  const queries = [];
+  const client = {
+    async query(sql, values = []) {
+      queries.push({ sql, values });
+      if (sql === "BEGIN" || sql === "COMMIT") return { rows: [] };
+      if (sql.includes("FROM neighborhoods")) return { rows: [{ neighborhood_id: 12 }] };
+      if (sql.includes("SELECT user_id, role_id FROM users")) {
+        return { rows: [{ user_id: 31, role_id: 3 }] };
+      }
+      if (sql.includes("SELECT user_id") && sql.includes("role_id = 2")) return { rows: [] };
+      if (sql.includes("UPDATE users")) return { rows: [] };
+      throw new Error(`Consulta inesperada: ${sql}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  try {
+    const res = createResponse();
+    await setNeighborhoodAdmin(
+      {
+        params: { id: 12 },
+        body: { admin_user_id: 31, promote: true },
+        app: { get: () => null },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      queries.some(({ sql }) => sql.includes("role_id = 2 WHERE user_id = $2")),
+      true,
+    );
+  } finally {
+    pool.connect = originalConnect;
+  }
+});
 test("verifyToken usa el rol y barrio actuales de la base de datos", async () => {
   const originalQuery = pool.query;
   pool.query = async () => ({

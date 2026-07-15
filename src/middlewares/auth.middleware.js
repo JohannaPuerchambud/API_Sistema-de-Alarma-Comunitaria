@@ -41,4 +41,5 @@ export const requireRoles =
 
 export const onlyAdminGeneral = requireRoles(1);
 export const adminGeneralOrBarr = requireRoles(1, 2);
+export const neighborhoodMember = requireRoles(2, 3);
 export const onlyUser = requireRoles(3);

@@ -61,8 +61,8 @@ export const initSocket = (httpServer) => {
   io.on("connection", async (socket) => {
     const { id, neighborhood, role } = socket.user;
 
-    if (Number(role) !== 3) {
-      socket.emit("error_message", "Solo usuarios pueden usar el chat.");
+    if (![2, 3].includes(Number(role))) {
+      socket.emit("error_message", "Solo miembros del barrio pueden usar el chat.");
       socket.disconnect(true);
       return;
     }
@@ -131,7 +131,7 @@ export const initSocket = (httpServer) => {
         const currentUser = await getCurrentUser(id);
         if (
           !currentUser ||
-          Number(currentUser.role) !== 3 ||
+          ![2, 3].includes(Number(currentUser.role)) ||
           Number(currentUser.neighborhood) !== Number(neighborhood)
         ) {
           socket.emit("error_message", "Tu sesion o permisos cambiaron.");
