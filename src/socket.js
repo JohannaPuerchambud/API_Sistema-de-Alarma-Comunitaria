@@ -1,41 +1,18 @@
-// socket.js
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { pool } from "./config/db.js";
 import { getCurrentUser } from "./services/current-user.service.js";
-import { sendNeighborhoodPush } from "./services/push-notification.service.js";
+import {
+  broadcastNeighborhoodChatMessage,
+  createNeighborhoodChatMessage,
+  isAllowedChatImageUrl,
+  validateChatPayload,
+} from "./services/chat-message.service.js";
 
-const MAX_CHAT_MESSAGE_LENGTH = 2000;
 const CHAT_RATE_WINDOW_MS = 10_000;
 const CHAT_RATE_LIMIT = 10;
 
-const FIREBASE_STORAGE_BUCKET =
-  process.env.FIREBASE_STORAGE_BUCKET ||
-  "alarmacomunitaria-utn-5e6be.firebasestorage.app";
-
-export const isAllowedChatImageUrl = (value) => {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return false;
-
-    const firebasePath =
-      `/v0/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o/`;
-    const isFirebaseDownload =
-      url.hostname === "firebasestorage.googleapis.com" &&
-      url.pathname.startsWith(firebasePath) &&
-      url.searchParams.get("alt") === "media" &&
-      Boolean(url.searchParams.get("token"));
-
-    const isLegacySignedUrl =
-      (url.hostname === "storage.googleapis.com" &&
-        url.pathname.startsWith(`/${FIREBASE_STORAGE_BUCKET}/`)) ||
-      (url.hostname === `${FIREBASE_STORAGE_BUCKET}.storage.googleapis.com`);
-
-    return isFirebaseDownload || isLegacySignedUrl;
-  } catch {
-    return false;
-  }
-};
+export { isAllowedChatImageUrl };
 
 export const initSocket = (httpServer) => {
   const allowedOrigins = new Set([
@@ -53,6 +30,8 @@ export const initSocket = (httpServer) => {
       methods: ["GET", "POST"],
     },
     maxHttpBufferSize: 1_000_000,
+    pingInterval: 25_000,
+    pingTimeout: 60_000,
   });
 
   io.use(async (socket, next) => {
@@ -69,7 +48,7 @@ export const initSocket = (httpServer) => {
 
       socket.user = currentUser;
       next();
-    } catch (e) {
+    } catch {
       next(new Error("INVALID_TOKEN"));
     }
   });
@@ -78,7 +57,10 @@ export const initSocket = (httpServer) => {
     const { id, neighborhood, role } = socket.user;
 
     if (![2, 3].includes(Number(role))) {
-      socket.emit("error_message", "Solo miembros del barrio pueden usar el chat.");
+      socket.emit(
+        "error_message",
+        "Solo miembros del barrio pueden usar el chat.",
+      );
       socket.disconnect(true);
       return;
     }
@@ -108,25 +90,19 @@ export const initSocket = (httpServer) => {
       );
 
       socket.emit("history", rows.reverse());
-    } catch (e) {
+    } catch {
       socket.emit("error_message", "No se pudo cargar el historial.");
     }
 
     const recentMessageTimes = [];
 
     socket.on("send_message", async (payload) => {
-      const text = String(payload?.message || "").trim();
-      const imageUrl = String(payload?.image_url || "").trim() || null;
-
-      if (!text && !imageUrl) return;
-
-      if (text.length > MAX_CHAT_MESSAGE_LENGTH) {
-        socket.emit("error_message", "El mensaje no puede superar 2000 caracteres.");
-        return;
-      }
-
-      if (imageUrl && !isAllowedChatImageUrl(imageUrl)) {
-        socket.emit("error_message", "La URL de imagen no es válida.");
+      let text;
+      let imageUrl;
+      try {
+        ({ text, imageUrl } = validateChatPayload(payload));
+      } catch (error) {
+        socket.emit("error_message", error.message);
         return;
       }
 
@@ -138,63 +114,28 @@ export const initSocket = (httpServer) => {
         recentMessageTimes.shift();
       }
       if (recentMessageTimes.length >= CHAT_RATE_LIMIT) {
-        socket.emit("error_message", "Estás enviando mensajes demasiado rápido.");
+        socket.emit(
+          "error_message",
+          "Estás enviando mensajes demasiado rápido.",
+        );
         return;
       }
       recentMessageTimes.push(now);
 
       try {
-        const currentUser = await getCurrentUser(id);
-        if (
-          !currentUser ||
-          ![2, 3].includes(Number(currentUser.role)) ||
-          Number(currentUser.neighborhood) !== Number(neighborhood)
-        ) {
-          socket.emit("error_message", "Tu sesion o permisos cambiaron.");
+        const message = await createNeighborhoodChatMessage({
+          userId: id,
+          neighborhoodId: neighborhood,
+          text,
+          imageUrl,
+        });
+        broadcastNeighborhoodChatMessage({ io, message });
+      } catch (error) {
+        if (Number(error.status) === 403) {
+          socket.emit("error_message", error.message);
           socket.disconnect(true);
           return;
         }
-
-        const { rows } = await pool.query(
-          `
-          INSERT INTO chat_messages (user_id, neighborhood_id, message, image_url, created_at)
-          VALUES ($1, $2, $3, $4, NOW())
-          RETURNING message_id, message, image_url, created_at
-          `,
-          [id, neighborhood, text || "📷 Foto", imageUrl],
-        );
-
-        const msg = {
-          message_id: rows[0].message_id,
-          message: rows[0].message,
-          image_url: rows[0].image_url,
-          created_at: rows[0].created_at,
-          user_id: id,
-          name: socket.user.name,
-          last_name: socket.user.last_name || null,
-          neighborhood_id: neighborhood,
-        };
-
-        io.to(room).emit("new_message", msg);
-
-        sendNeighborhoodPush({
-          neighborhoodId: neighborhood,
-          excludeUserId: id,
-          title: `Nuevo mensaje de ${socket.user.name}`,
-          body: text || "Foto enviada al chat",
-          data: {
-            type: "chat",
-            neighborhood_id: neighborhood,
-            message_id: rows[0].message_id,
-          },
-        })
-          .then((delivery) => {
-            console.log("Entrega push del chat:", delivery);
-          })
-          .catch((pushError) => {
-            console.error("Error enviando push del chat:", pushError);
-          });
-      } catch (e) {
         socket.emit("error_message", "No se pudo enviar el mensaje.");
       }
     });

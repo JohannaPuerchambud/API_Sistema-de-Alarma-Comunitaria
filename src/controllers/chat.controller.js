@@ -1,5 +1,26 @@
 import { pool } from "../config/db.js";
 import { uploadImageToFirebase } from "../services/firebase-storage.service.js";
+import {
+  broadcastNeighborhoodChatMessage,
+  createNeighborhoodChatMessage,
+  enforceChatRateLimit,
+  validateChatPayload,
+} from "../services/chat-message.service.js";
+
+const CHAT_IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
+const sentMessagesByRequest = new Map();
+
+const getChatRequestKey = (req, userId) => {
+  const rawKey = String(req.get("Idempotency-Key") || "").trim();
+  if (!rawKey || rawKey.length > 128) return null;
+
+  const now = Date.now();
+  for (const [key, entry] of sentMessagesByRequest.entries()) {
+    if (entry.expiresAt <= now) sentMessagesByRequest.delete(key);
+  }
+
+  return `${userId}:${rawKey}`;
+};
 
 export const getNeighborhoodMessages = async (req, res) => {
   try {
@@ -33,6 +54,57 @@ export const getNeighborhoodMessages = async (req, res) => {
   }
 };
 
+export const sendNeighborhoodMessage = async (req, res) => {
+  try {
+    const { id, neighborhood } = req.user;
+    const { text, imageUrl } = validateChatPayload(req.body);
+
+    if (!neighborhood) {
+      return res
+        .status(400)
+        .json({ message: "Tu usuario no tiene barrio asignado." });
+    }
+
+    const requestKey = getChatRequestKey(req, id);
+    const cachedMessage = requestKey
+      ? sentMessagesByRequest.get(requestKey)
+      : null;
+    if (cachedMessage && cachedMessage.expiresAt > Date.now()) {
+      return res.status(201).json(cachedMessage.message);
+    }
+
+    enforceChatRateLimit(id);
+
+    const message = await createNeighborhoodChatMessage({
+      userId: id,
+      neighborhoodId: neighborhood,
+      text,
+      imageUrl,
+    });
+
+    if (requestKey) {
+      sentMessagesByRequest.set(requestKey, {
+        message,
+        expiresAt: Date.now() + CHAT_IDEMPOTENCY_TTL_MS,
+      });
+    }
+
+    broadcastNeighborhoodChatMessage({
+      io: req.app.get("io"),
+      message,
+    });
+
+    res.status(201).json(message);
+  } catch (error) {
+    console.error("Error enviando mensaje del barrio:", error);
+    const status = Number(error.status) || 500;
+    res.status(status).json({
+      message:
+        status >= 500 ? "No se pudo enviar el mensaje." : error.message,
+    });
+  }
+};
+
 export const uploadChatImage = async (req, res) => {
   try {
     if (!req.user.neighborhood) {
@@ -42,9 +114,11 @@ export const uploadChatImage = async (req, res) => {
     }
 
     if (!req.file) {
-      return res
-        .status(400)
-        .json({ message: "No se recibió ninguna imagen." });
+      return res.status(400).json({
+        message:
+          req.uploadWarning?.message || "No se recibió ninguna imagen.",
+        code: req.uploadWarning?.code || "image_missing",
+      });
     }
 
     const result = await uploadImageToFirebase({
