@@ -7,6 +7,11 @@ import {
   releaseEmergencyCooldown,
 } from "../services/emergency-cooldown.service.js";
 import { uploadImageToFirebase } from "../services/firebase-storage.service.js";
+import { getNeighborhoodActivityRows } from "../services/neighborhood-activity.service.js";
+import {
+  createProtectedMediaUrl,
+  requestOrigin,
+} from "../services/protected-media.service.js";
 import {
   deleteInvalidPushTokens,
   getNeighborhoodPushRecipients,
@@ -66,6 +71,16 @@ const addErrorCode = (target, code, count = 1) => {
   target[key] = (target[key] || 0) + count;
 };
 
+
+const protectReportRows = (rows, req) => {
+  const origin = requestOrigin(req);
+  return Promise.all(
+    rows.map(async (report) => ({
+      ...report,
+      image_url: await createProtectedMediaUrl(report.image_url, { origin }),
+    })),
+  );
+};
 const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
 const TWILIO_FROM_NUMBER = normalizePhoneNumber(
   process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_PHONE,
@@ -178,10 +193,14 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
     );
     const io = req.app.get("io");
     if (io) {
+      const protectedImageUrl = await createProtectedMediaUrl(
+        rows[0].chat_image_url,
+        { origin: requestOrigin(req) },
+      );
       io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
         message_id: rows[0].chat_message_id,
         message: rows[0].chat_message,
-        image_url: rows[0].chat_image_url,
+        image_url: protectedImageUrl,
         created_at: rows[0].chat_created_at,
         user_id: user_id,
         name: name,
@@ -215,6 +234,11 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
         notification: {
           title: alertTitle,
           body: alertBody,
+        },
+        data: {
+          type: "report",
+          activity_id: `report-${rows[0].report_id}`,
+          report_id: String(rows[0].report_id),
         },
         android: { priority: "high", notification: { sound: "default" } },
         apns: { payload: { aps: { sound: "default" } } },
@@ -252,6 +276,9 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
     );
     const reportData = rows[0];
     reportData.address = userResult.rows[0]?.address || null;
+    reportData.image_url = await createProtectedMediaUrl(reportData.image_url, {
+      origin: requestOrigin(req),
+    });
 
     res.status(201).json({
       message: "Reporte de actividad sospechosa creado",
@@ -418,10 +445,14 @@ export const triggerEmergency = async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
+      const protectedImageUrl = await createProtectedMediaUrl(
+        chatResult.rows[0].image_url,
+        { origin: requestOrigin(req) },
+      );
       io.to(`neighborhood_${neighborhood_id}`).emit("new_message", {
         message_id: chatResult.rows[0].message_id,
         message: chatResult.rows[0].message,
-        image_url: chatResult.rows[0].image_url,
+        image_url: protectedImageUrl,
         created_at: chatResult.rows[0].created_at,
         user_id: user_id,
         name: name,
@@ -490,6 +521,11 @@ export const triggerEmergency = async (req, res) => {
         notification: {
           title: "🚨 ¡EMERGENCIA en tu barrio!",
           body: `${name}: ${String(justification).trim()}`,
+        },
+        data: {
+          type: "emergency",
+          activity_id: `emergency-${chatResult.rows[0].message_id}`,
+          message_id: String(chatResult.rows[0].message_id),
         },
         android: { priority: "high", notification: { sound: "default" } },
         apns: { payload: { aps: { sound: "default" } } },
@@ -649,7 +685,7 @@ export const getAllReports = async (req, res) => {
       values,
     );
 
-    res.json(rows);
+    res.json(await protectReportRows(rows, req));
   } catch (err) {
     res.status(500).json({ message: "Error interno del servidor." });
   }
@@ -682,9 +718,32 @@ export const getNeighborhoodReports = async (req, res) => {
       [neighborhood_id],
     );
 
-    res.json(rows);
+    res.json(await protectReportRows(rows, req));
   } catch (err) {
     res.status(500).json({ message: "Error interno del servidor." });
+  }
+};
+
+export const getNeighborhoodActivity = async (req, res) => {
+  try {
+    const { neighborhood: neighborhood_id } = req.user;
+
+    if (!neighborhood_id) {
+      return res
+        .status(400)
+        .json({ message: "Tu usuario no tiene barrio asignado." });
+    }
+
+    const activity = await getNeighborhoodActivityRows(
+      neighborhood_id,
+      requestOrigin(req),
+    );
+    res.json(activity);
+  } catch (error) {
+    console.error("Error consultando actividad del barrio:", error);
+    res
+      .status(500)
+      .json({ message: "No se pudo cargar la actividad del barrio." });
   }
 };
 
@@ -701,7 +760,7 @@ export const getMyReports = async (req, res) => {
       [user_id],
     );
 
-    res.json(rows);
+    res.json(await protectReportRows(rows, req));
   } catch (err) {
     res.status(500).json({ message: "Error interno del servidor." });
   }

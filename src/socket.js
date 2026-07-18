@@ -8,6 +8,7 @@ import {
   isAllowedChatImageUrl,
   validateChatPayload,
 } from "./services/chat-message.service.js";
+import { createProtectedMediaUrl } from "./services/protected-media.service.js";
 
 const CHAT_RATE_WINDOW_MS = 10_000;
 const CHAT_RATE_LIMIT = 10;
@@ -89,7 +90,13 @@ export const initSocket = (httpServer) => {
         [neighborhood],
       );
 
-      socket.emit("history", rows.reverse());
+      const history = await Promise.all(
+        rows.reverse().map(async (message) => ({
+          ...message,
+          image_url: await createProtectedMediaUrl(message.image_url),
+        })),
+      );
+      socket.emit("history", history);
     } catch {
       socket.emit("error_message", "No se pudo cargar el historial.");
     }

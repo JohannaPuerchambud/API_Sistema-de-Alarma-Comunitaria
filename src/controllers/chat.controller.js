@@ -6,6 +6,10 @@ import {
   enforceChatRateLimit,
   validateChatPayload,
 } from "../services/chat-message.service.js";
+import {
+  createProtectedMediaUrl,
+  requestOrigin,
+} from "../services/protected-media.service.js";
 
 const CHAT_IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 const sentMessagesByRequest = new Map();
@@ -47,7 +51,14 @@ export const getNeighborhoodMessages = async (req, res) => {
       [neighborhood, limit],
     );
 
-    res.json(q.rows.reverse());
+    const origin = requestOrigin(req);
+    const messages = await Promise.all(
+      q.rows.reverse().map(async (message) => ({
+        ...message,
+        image_url: await createProtectedMediaUrl(message.image_url, { origin }),
+      })),
+    );
+    res.json(messages);
   } catch (error) {
     console.error("Error consultando mensajes del barrio:", error);
     res.status(500).json({ message: "Error interno del servidor." });
@@ -80,6 +91,7 @@ export const sendNeighborhoodMessage = async (req, res) => {
       neighborhoodId: neighborhood,
       text,
       imageUrl,
+      mediaOrigin: requestOrigin(req),
     });
 
     if (requestKey) {

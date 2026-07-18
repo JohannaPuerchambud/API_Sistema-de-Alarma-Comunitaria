@@ -9,6 +9,7 @@ import { geocodeRoutes } from "./routes/geocode.routes.js";
 import { reportRoutes } from "./routes/report.routes.js";
 import { chatRoutes } from "./routes/chat.routes.js";
 import { upcRoutes } from "./routes/upc.routes.js"; 
+import { mediaRoutes } from "./routes/media.routes.js";
 
 dotenv.config();
 
@@ -47,6 +48,7 @@ app.use("/api/geocode", geocodeRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/upcs", upcRoutes);
+app.use("/api/media", mediaRoutes);
 
 app.get("/test", (req, res) => {
   res.json({ message: "API funcionando correctamente 🚀" });

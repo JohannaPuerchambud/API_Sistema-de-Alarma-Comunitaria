@@ -9,6 +9,7 @@ import { uploadImage } from "../middlewares/upload.middleware.js";
 import {
   createReport,
   getAllReports,
+  getNeighborhoodActivity,
   getNeighborhoodReports,
   getMyReports,
   triggerEmergency,
@@ -25,5 +26,7 @@ reportRoutes.post("/", verifyToken, neighborhoodMember, uploadImage, createRepor
 reportRoutes.post("/emergency", verifyToken, neighborhoodMember, uploadImage, triggerEmergency);
 
 reportRoutes.get("/neighborhood", verifyToken, neighborhoodMember, getNeighborhoodReports);
+
+reportRoutes.get("/activity", verifyToken, neighborhoodMember, getNeighborhoodActivity);
 
 reportRoutes.get("/mine", verifyToken, neighborhoodMember, getMyReports);

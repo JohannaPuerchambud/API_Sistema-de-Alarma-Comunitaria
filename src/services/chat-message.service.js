@@ -1,6 +1,10 @@
 import { pool } from "../config/db.js";
 import { storageBucketName } from "../config/firebase.js";
 import { getCurrentUser } from "./current-user.service.js";
+import {
+  createProtectedMediaUrl,
+  parseStorageReference,
+} from "./protected-media.service.js";
 import { sendNeighborhoodPush } from "./push-notification.service.js";
 
 export const MAX_CHAT_MESSAGE_LENGTH = 2000;
@@ -9,6 +13,11 @@ const CHAT_RATE_LIMIT = 10;
 const recentRestMessageTimes = new Map();
 
 export const isAllowedChatImageUrl = (value) => {
+  const storageReference = parseStorageReference(value);
+  if (storageReference) {
+    return storageReference.bucket === storageBucketName;
+  }
+
   try {
     const url = new URL(value);
     if (url.protocol !== "https:") return false;
@@ -77,6 +86,7 @@ export const createNeighborhoodChatMessage = async ({
   neighborhoodId,
   text,
   imageUrl,
+  mediaOrigin,
 }) => {
   const currentUser = await getCurrentUser(userId);
   if (
@@ -98,16 +108,20 @@ export const createNeighborhoodChatMessage = async ({
     [userId, neighborhoodId, text || "📷 Foto", imageUrl],
   );
 
-  return {
+  const message = {
     message_id: rows[0].message_id,
     message: rows[0].message,
-    image_url: rows[0].image_url,
+    image_url: await createProtectedMediaUrl(rows[0].image_url, {
+      origin: mediaOrigin,
+    }),
     created_at: rows[0].created_at,
     user_id: userId,
     name: currentUser.name,
     last_name: currentUser.last_name || null,
     neighborhood_id: neighborhoodId,
   };
+
+  return message;
 };
 
 export const broadcastNeighborhoodChatMessage = ({ io, message }) => {

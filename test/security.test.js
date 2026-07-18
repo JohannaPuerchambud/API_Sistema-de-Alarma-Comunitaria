@@ -16,6 +16,9 @@ const { triggerEmergency } = await import(
 );
 const { isAllowedChatImageUrl } = await import("../src/socket.js");
 const { normalizeStorageBucket } = await import("../src/config/firebase.js");
+const { parseEmergencyMessage } = await import(
+  "../src/services/neighborhood-activity.service.js"
+);
 const { getNeighborhoodPushRecipients } = await import("../src/services/push-token.service.js");
 const { updateNeighborhoodUsers, setNeighborhoodAdmin } = await import("../src/controllers/neighborhood.controller.js");
 const { claimEmergencyCooldown, releaseEmergencyCooldown } = await import(
@@ -467,4 +470,19 @@ test("los tokens push usan users.fcm_token si falta la tabla auxiliar", async ()
   } finally {
     pool.query = originalQuery;
   }
+});
+test("normaliza una emergencia del chat para la actividad del barrio", () => {
+  const parsed = parseEmergencyMessage(
+    "🚨 ¡EMERGENCIA ACTIVADA! 🚨\nMotivo: Fuga de gas\nVecino: María López\nDirección: Calle Principal 12\n[LOCATION:0.351,-78.122]",
+    "Dirección alternativa",
+  );
+
+  assert.deepEqual(parsed, {
+    title: "Emergencia",
+    description: "Fuga de gas",
+    address: "Calle Principal 12",
+    latitude: 0.351,
+    longitude: -78.122,
+  });
+  assert.equal(parseEmergencyMessage("Mensaje normal"), null);
 });
