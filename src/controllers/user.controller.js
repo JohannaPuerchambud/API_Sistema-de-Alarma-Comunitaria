@@ -1,11 +1,43 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../config/db.js";
 import { deletePushToken, savePushToken } from "../services/push-token.service.js";
+import { isPointInsideNeighborhood } from "../utils/neighborhood-boundary.js";
 
 const sameNeighborhood = (a, b) => Number(a) === Number(b);
 
 const isStrongPassword = (pwd) =>
   /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pwd || "");
+
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+
+const validateHomeLocation = async (
+  neighborhoodId,
+  homeLat,
+  homeLng,
+) => {
+  const hasLat = homeLat != null && homeLat !== "";
+  const hasLng = homeLng != null && homeLng !== "";
+
+  if (hasLat !== hasLng) return "La ubicación del domicilio está incompleta.";
+  if (!hasLat) return null;
+
+  const lat = Number(homeLat);
+  const lng = Number(homeLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return "Las coordenadas del domicilio no son válidas.";
+  }
+  if (!neighborhoodId) return null;
+
+  const { rows } = await pool.query(
+    "SELECT name, boundary FROM neighborhoods WHERE neighborhood_id = $1",
+    [neighborhoodId],
+  );
+  if (rows.length === 0) return "El barrio seleccionado no existe.";
+  if (!isPointInsideNeighborhood(lat, lng, rows[0].boundary)) {
+    return `La ubicación del domicilio debe estar dentro de ${rows[0].name}.`;
+  }
+  return null;
+};
 
 // Listar
 export const getUsers = async (req, res) => {
@@ -141,6 +173,20 @@ export const createUser = async (req, res) => {
     const effectiveRoleId = role === 2 ? 3 : (role_id ?? 3);
     const effectiveNeighborhoodId =
       role === 2 ? neighborhood : (neighborhood_id ?? null);
+    const normalizedEmail = normalizeEmail(email);
+
+    const duplicateEmail = await pool.query(
+      "SELECT user_id FROM users WHERE LOWER(email) = $1 LIMIT 1",
+      [normalizedEmail],
+    );
+    if (duplicateEmail.rows.length > 0) {
+      return res.status(409).json({
+        message: "Este correo electrónico ya está registrado. Utiliza uno diferente.",
+      });
+    }
+
+    const locationError = await validateHomeLocation(effectiveNeighborhoodId, home_lat, home_lng);
+    if (locationError) return res.status(400).json({ message: locationError });
 
     const hash = await bcrypt.hash(password, 10);
 
@@ -165,7 +211,7 @@ export const createUser = async (req, res) => {
       [
         name,
         last_name ?? null,
-        email,
+        normalizedEmail,
         hash,
         effectiveRoleId,
         effectiveNeighborhoodId,
@@ -179,7 +225,7 @@ export const createUser = async (req, res) => {
     res.status(201).json(rows[0]);
   } catch (err) {
     if (err.code === "23505") {
-      return res.status(409).json({ message: "El email ya está registrado." });
+      return res.status(409).json({ message: "Este correo electrónico ya está registrado. Utiliza uno diferente." });
     }
     res.status(500).json({ message: "Error interno del servidor." });
   }
@@ -233,13 +279,26 @@ export const updateUser = async (req, res) => {
     const effectiveRoleId = role === 2 ? 3 : role_id;
     const effectiveNeighborhoodId =
       role === 2 ? neighborhood : (neighborhood_id ?? null);
+    const normalizedEmail = normalizeEmail(email);
 
     if (password && !isStrongPassword(password)) {
       return res.status(400).json({
-        message:
-          "Contraseña débil: mínimo 8 caracteres e incluir letras y números.",
+        message: "Contraseña débil: mínimo 8 caracteres e incluir letras y números.",
       });
     }
+
+    const duplicateEmail = await pool.query(
+      "SELECT user_id FROM users WHERE LOWER(email) = $1 AND user_id <> $2 LIMIT 1",
+      [normalizedEmail, id],
+    );
+    if (duplicateEmail.rows.length > 0) {
+      return res.status(409).json({
+        message: "Este correo electrónico ya está registrado. Utiliza uno diferente.",
+      });
+    }
+
+    const locationError = await validateHomeLocation(effectiveNeighborhoodId, home_lat, home_lng);
+    if (locationError) return res.status(400).json({ message: locationError });
 
     const sets = [
       "name = $1",
@@ -256,7 +315,7 @@ export const updateUser = async (req, res) => {
     let vals = [
       name,
       last_name ?? null,
-      email,
+      normalizedEmail,
       effectiveRoleId,
       effectiveNeighborhoodId,
       address ?? null,
@@ -272,7 +331,7 @@ export const updateUser = async (req, res) => {
       vals = [
         name,
         last_name ?? null,
-        email,
+        normalizedEmail,
         effectiveRoleId,
         effectiveNeighborhoodId,
         address ?? null,
@@ -305,7 +364,7 @@ export const updateUser = async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     if (err.code === "23505") {
-      return res.status(409).json({ message: "El email ya está registrado." });
+      return res.status(409).json({ message: "Este correo electrónico ya está registrado. Utiliza uno diferente." });
     }
     res.status(500).json({ message: "Error interno del servidor." });
   }
@@ -391,6 +450,8 @@ export const getAdmins = async (req, res) => {
         u.last_name,
         u.email,
         u.phone,
+        u.home_lat,
+        u.home_lng,
         u.neighborhood_id,
         n.name AS neighborhood_name
       FROM users u

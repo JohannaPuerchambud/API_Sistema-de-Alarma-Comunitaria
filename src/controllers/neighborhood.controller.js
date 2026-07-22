@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { isPointInsideNeighborhood } from "../utils/neighborhood-boundary.js";
 
 // ── Listar barrios con nombre de UPC y datos del representante (role_id=2) ──
 export const getNeighborhoods = async (req, res) => {
@@ -197,7 +198,7 @@ export const updateNeighborhoodUsers = async (req, res) => {
     await client.query("BEGIN");
 
     const neighborhood = await client.query(
-      "SELECT neighborhood_id FROM neighborhoods WHERE neighborhood_id = $1 FOR UPDATE",
+      "SELECT neighborhood_id, name, boundary FROM neighborhoods WHERE neighborhood_id = $1 FOR UPDATE",
       [id],
     );
     if (neighborhood.rows.length === 0) {
@@ -206,7 +207,7 @@ export const updateNeighborhoodUsers = async (req, res) => {
     }
 
     const candidates = await client.query(
-      `SELECT user_id, role_id, neighborhood_id
+      `SELECT user_id, name, last_name, role_id, neighborhood_id, home_lat, home_lng
        FROM users
        WHERE user_id = ANY($1::int[])
        FOR UPDATE`,
@@ -225,6 +226,30 @@ export const updateNeighborhoodUsers = async (req, res) => {
       return res.status(400).json({
         message: "Los representantes deben asignarse mediante la acción Designar representante.",
       });
+    }
+
+    if (action === "add") {
+      const targetNeighborhood = neighborhood.rows[0];
+      const invalidLocation = candidates.rows.find((user) => {
+        const hasLat = user.home_lat != null && user.home_lat !== "";
+        const hasLng = user.home_lng != null && user.home_lng !== "";
+        return (
+          hasLat !== hasLng ||
+          (hasLat &&
+            !isPointInsideNeighborhood(
+              Number(user.home_lat),
+              Number(user.home_lng),
+              targetNeighborhood.boundary,
+            ))
+        );
+      });
+      if (invalidLocation) {
+        await client.query("ROLLBACK");
+        const userName = `${invalidLocation.name || ""} ${invalidLocation.last_name || ""}`.trim();
+        return res.status(400).json({
+          message: `El domicilio de ${userName || "uno de los habitantes"} debe estar dentro de ${targetNeighborhood.name}.`,
+        });
+      }
     }
 
     if (action === "remove") {
@@ -307,7 +332,7 @@ export const setNeighborhoodAdmin = async (req, res) => {
     await client.query("BEGIN");
 
     const neighborhood = await client.query(
-      "SELECT neighborhood_id FROM neighborhoods WHERE neighborhood_id = $1 FOR UPDATE",
+      "SELECT neighborhood_id, name, boundary FROM neighborhoods WHERE neighborhood_id = $1 FOR UPDATE",
       [id],
     );
     if (neighborhood.rows.length === 0) {
@@ -317,7 +342,7 @@ export const setNeighborhoodAdmin = async (req, res) => {
 
     if (admin_user_id != null) {
       const candidate = await client.query(
-        "SELECT user_id, role_id FROM users WHERE user_id = $1 FOR UPDATE",
+        "SELECT user_id, role_id, home_lat, home_lng FROM users WHERE user_id = $1 FOR UPDATE",
         [admin_user_id],
       );
       if (candidate.rows.length === 0) {
@@ -332,6 +357,24 @@ export const setNeighborhoodAdmin = async (req, res) => {
             candidateRole === 1
               ? "El Admin General no puede ser representante de un barrio."
               : "Confirma la promoción del habitante a representante.",
+        });
+      }
+
+      const candidateUser = candidate.rows[0];
+      const hasLat = candidateUser.home_lat != null && candidateUser.home_lat !== "";
+      const hasLng = candidateUser.home_lng != null && candidateUser.home_lng !== "";
+      if (
+        hasLat !== hasLng ||
+        (hasLat &&
+          !isPointInsideNeighborhood(
+            Number(candidateUser.home_lat),
+            Number(candidateUser.home_lng),
+            neighborhood.rows[0].boundary,
+          ))
+      ) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          message: `El domicilio del representante debe estar dentro de ${neighborhood.rows[0].name}.`,
         });
       }
     }

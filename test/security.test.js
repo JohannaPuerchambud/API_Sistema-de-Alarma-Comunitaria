@@ -21,6 +21,7 @@ const { parseEmergencyMessage } = await import(
 );
 const { getNeighborhoodPushRecipients } = await import("../src/services/push-token.service.js");
 const { updateNeighborhoodUsers, setNeighborhoodAdmin } = await import("../src/controllers/neighborhood.controller.js");
+const { isPointInsideNeighborhood } = await import("../src/utils/neighborhood-boundary.js");
 const { claimEmergencyCooldown, releaseEmergencyCooldown } = await import(
   "../src/services/emergency-cooldown.service.js"
 );
@@ -43,6 +44,87 @@ const createResponse = () => ({
   },
 });
 
+test("valida puntos dentro, fuera y sobre el limite del barrio", () => {
+  const boundary = [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+    [1, 0],
+  ];
+
+  assert.equal(isPointInsideNeighborhood(0.5, 0.5, boundary), true);
+  assert.equal(isPointInsideNeighborhood(2, 2, boundary), false);
+  assert.equal(isPointInsideNeighborhood(0, 0.5, boundary), true);
+});
+
+test("rechaza la creacion de un habitante fuera del barrio asignado", async () => {
+  const originalQuery = pool.query;
+  pool.query = async (sql) => {
+    const query = String(sql);
+    if (query.includes("LOWER(email)")) return { rows: [] };
+    if (query.includes("SELECT name, boundary FROM neighborhoods")) {
+      return {
+        rows: [{
+          name: "El Olivo",
+          boundary: [[0, 0], [0, 1], [1, 1], [1, 0]],
+        }],
+      };
+    }
+    throw new Error(`Consulta inesperada: ${query}`);
+  };
+
+  try {
+    const res = createResponse();
+    await createUser(
+      {
+        user: { role: 2, neighborhood: 4 },
+        body: {
+          name: "Vecino",
+          email: "vecino-fuera@example.test",
+          password: "Segura123",
+          role_id: 3,
+          home_lat: 2,
+          home_lng: 2,
+        },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.match(res.payload.message, /dentro de El Olivo/);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
+
+test("informa de forma explicita cuando el correo ya existe", async () => {
+  const originalQuery = pool.query;
+  pool.query = async (sql) => {
+    if (String(sql).includes("LOWER(email)")) return { rows: [{ user_id: 9 }] };
+    throw new Error("No debio continuar con la creacion");
+  };
+
+  try {
+    const res = createResponse();
+    await createUser(
+      {
+        user: { role: 1, neighborhood: null },
+        body: {
+          name: "Duplicado",
+          email: "DUPLICADO@example.test",
+          password: "Segura123",
+          role_id: 3,
+        },
+      },
+      res,
+    );
+
+    assert.equal(res.statusCode, 409);
+    assert.match(res.payload.message, /ya est.* registrado/i);
+  } finally {
+    pool.query = originalQuery;
+  }
+});
 test("roles 2 y 3 pueden usar funciones comunitarias, pero el rol 1 no", () => {
   for (const role of [2, 3]) {
     const req = { user: { role } };
@@ -113,7 +195,7 @@ test("promueve explicitamente un habitante a representante sin cambiar el esquem
       queries.push({ sql, values });
       if (sql === "BEGIN" || sql === "COMMIT") return { rows: [] };
       if (sql.includes("FROM neighborhoods")) return { rows: [{ neighborhood_id: 12 }] };
-      if (sql.includes("SELECT user_id, role_id FROM users")) {
+      if (sql.includes("FROM users WHERE user_id = $1 FOR UPDATE")) {
         return { rows: [{ user_id: 31, role_id: 3 }] };
       }
       if (sql.includes("SELECT user_id") && sql.includes("role_id = 2")) return { rows: [] };
