@@ -1,7 +1,6 @@
 // controllers/report.controller.js
 import { pool } from "../config/db.js";
 import admin from "../config/firebase.js";
-import twilio from "twilio";
 import {
   claimEmergencyCooldown,
   releaseEmergencyCooldown,
@@ -50,20 +49,15 @@ const normalizePhoneNumber = (value) => {
 
 const isE164PhoneNumber = (value) => /^\+[1-9]\d{7,14}$/.test(value);
 
-const twilioStatusFromError = (errorCode) => {
-  switch (String(errorCode || "")) {
-    case "20003":
-      return "twilio_auth_failed";
-    case "21211":
-      return "invalid_alarm_number";
-    case "21212":
-    case "21606":
-      return "invalid_twilio_from";
-    case "21608":
-      return "unverified_alarm_number";
-    default:
-      return "failed";
+const infobipStatusFromError = (httpStatus, errorBody) => {
+  if (httpStatus === 401) return "infobip_auth_failed";
+  if (httpStatus === 400) {
+    const desc = String(errorBody?.requestError?.serviceException?.text || "");
+    if (desc.toLowerCase().includes("invalid")) return "invalid_alarm_number";
+    return "bad_request";
   }
+  if (httpStatus === 404) return "invalid_alarm_number";
+  return "failed";
 };
 
 const addErrorCode = (target, code, count = 1) => {
@@ -81,14 +75,16 @@ const protectReportRows = (rows, req) => {
     })),
   );
 };
-const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-const TWILIO_FROM_NUMBER = normalizePhoneNumber(
-  process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_PHONE,
+
+const INFOBIP_BASE_URL = (process.env.INFOBIP_BASE_URL || "").replace(/\/$/, "");
+const INFOBIP_API_KEY  = process.env.INFOBIP_API_KEY  || "";
+const INFOBIP_FROM_NUMBER = normalizePhoneNumber(
+  process.env.INFOBIP_FROM_NUMBER || "",
 );
-const twilioClient =
-  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
-    ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    : null;
+const infobipIsConfigured = Boolean(
+  INFOBIP_BASE_URL && INFOBIP_API_KEY && INFOBIP_FROM_NUMBER &&
+  isE164PhoneNumber(INFOBIP_FROM_NUMBER),
+);
 
 // =============================================
 // REPORTES DE ACTIVIDAD SOSPECHOSA (sin sirena)
@@ -306,7 +302,7 @@ Detalle: ${String(description).trim()}${avisoFoto}`;
 };
 
 // =============================================
-// EMERGENCIA REAL (activa sirena + llamada Twilio)
+// EMERGENCIA REAL (activa sirena + llamada Infobip Voice)
 // =============================================
 export const triggerEmergency = async (req, res) => {
   let evidenceFile = null;
@@ -365,20 +361,6 @@ export const triggerEmergency = async (req, res) => {
       rawAlarmNumber && String(rawAlarmNumber).trim(),
     );
     const alarmNumberIsValid = isE164PhoneNumber(alarmNumber);
-    const twilioIsConfigured = Boolean(
-      twilioClient &&
-        TWILIO_FROM_NUMBER &&
-        isE164PhoneNumber(TWILIO_FROM_NUMBER),
-    );
-    const twilioConfigurationErrors = [
-      !TWILIO_ACCOUNT_SID ? "missing_account_sid" : null,
-      !TWILIO_AUTH_TOKEN ? "missing_auth_token" : null,
-      !TWILIO_FROM_NUMBER
-        ? "missing_from_number"
-        : !isE164PhoneNumber(TWILIO_FROM_NUMBER)
-          ? "invalid_from_number"
-          : null,
-    ].filter(Boolean);
     const neighborhoodName = neighborhoodQuery.rows[0].name;
 
     const userQuery = await pool.query(
@@ -504,10 +486,9 @@ export const triggerEmergency = async (req, res) => {
             ? "pending"
             : "no_recipients",
       },
-      twilio: {
+      infobip: {
         attempted: false,
-        configured: twilioIsConfigured,
-        configuration_errors: twilioConfigurationErrors,
+        configured: infobipIsConfigured,
         status: hasAlarmNumber
           ? alarmNumberIsValid
             ? "pending"
@@ -579,47 +560,62 @@ export const triggerEmergency = async (req, res) => {
       }
     }
 
-    // Activar sirena física mediante LLAMADA DE VOZ (Twilio Voice)
+    // Activar sirena física mediante LLAMADA DE VOZ (Infobip Voice API)
+    // La sirena GSM detecta la llamada entrante y activa el relé (ring-trigger).
+    // Infobip cuelga automáticamente cuando se agota callTimeout; no se genera
+    // gasto en la SIM receptora porque la sirena rechaza/cuelga sin contestar.
     if (hasAlarmNumber && !alarmNumberIsValid) {
       console.warn(
         "El numero de alarma del barrio no tiene formato E.164 valido.",
       );
-    } else if (alarmNumber && twilioIsConfigured) {
+    } else if (alarmNumber && infobipIsConfigured) {
       try {
-        console.log(`📞 Llamando a la sirena del barrio ${neighborhoodName}`);
-        const voiceResponse = new twilio.twiml.VoiceResponse();
-        voiceResponse.say(
-          { language: "es-MX" },
-          `Alerta de emergencia activada en el barrio ${neighborhoodName}. Emergencia reportada por ${name}.`,
-        );
-        voiceResponse.pause({ length: 2 });
-        voiceResponse.say(
-          { language: "es-MX" },
-          "Alerta de emergencia activada.",
-        );
+        console.log(`📞 [Infobip] Llamando a la sirena del barrio ${neighborhoodName} → ${alarmNumber}`);
 
-        const call = await twilioClient.calls.create({
-          twiml: voiceResponse.toString(),
-          from: TWILIO_FROM_NUMBER,
-          to: alarmNumber,
+        const infobipRes = await fetch(`${INFOBIP_BASE_URL}/calls/1/calls`, {
+          method: "POST",
+          headers: {
+            "Authorization": `App ${INFOBIP_API_KEY}`,
+            "Content-Type":  "application/json",
+            "Accept":         "application/json",
+          },
+          body: JSON.stringify({
+            endpoint: {
+              type: "PHONE",
+              phoneNumber: alarmNumber,
+            },
+            from: INFOBIP_FROM_NUMBER,
+            // callTimeout: segundos que espera antes de colgar si la sirena
+            // no cuelga sola. 15 s es más que suficiente para el ring-trigger.
+            callTimeout: 15,
+            connectTimeout: 30,
+          }),
         });
-        delivery.twilio.attempted = true;
-        delivery.twilio.status = call.status || "queued";
-        delivery.twilio.call_sid = call.sid;
-        console.log("🔊 ¡Llamada realizada a la sirena! ID:", call.sid);
-      } catch (twilioError) {
-        console.error(
-          "❌ Falló la llamada a la alarma:",
-          twilioError.message,
-        );
-        delivery.twilio.attempted = true;
-        delivery.twilio.status = twilioStatusFromError(twilioError.code);
-        delivery.twilio.error_code = twilioError.code || null;
+
+        let infobipBody = {};
+        try { infobipBody = await infobipRes.json(); } catch (_) { /* sin cuerpo */ }
+
+        delivery.infobip.attempted = true;
+
+        if (infobipRes.ok) {
+          delivery.infobip.status   = infobipBody.status || "queued";
+          delivery.infobip.call_id  = infobipBody.id     || null;
+          console.log("🔊 ¡Llamada Infobip iniciada! ID:", delivery.infobip.call_id);
+        } else {
+          delivery.infobip.status     = infobipStatusFromError(infobipRes.status, infobipBody);
+          delivery.infobip.error_code = infobipRes.status;
+          console.error("❌ Infobip rechazó la llamada:", infobipRes.status, JSON.stringify(infobipBody));
+        }
+      } catch (infobipError) {
+        console.error("❌ Error de red al llamar a Infobip:", infobipError.message);
+        delivery.infobip.attempted   = true;
+        delivery.infobip.status      = "failed";
+        delivery.infobip.error_code  = infobipError.code || null;
       }
     } else if (hasAlarmNumber) {
-      delivery.twilio.status = "not_configured";
+      delivery.infobip.status = "not_configured";
       console.warn(
-        "Twilio no esta configurado. Define TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN y TWILIO_PHONE.",
+        "Infobip no esta configurado. Define INFOBIP_BASE_URL, INFOBIP_API_KEY e INFOBIP_FROM_NUMBER en el .env.",
       );
     } else {
       console.warn("⚠️ Este barrio no tiene número de alarma configurado.");
@@ -628,6 +624,7 @@ export const triggerEmergency = async (req, res) => {
     res
       .status(201)
       .json({ message: "Emergencia activada correctamente", delivery });
+    console.log("📋 Delivery summary:", JSON.stringify(delivery.infobip));
   } catch (err) {
     if (cooldownClaimed && !emergencyRecorded) {
       await releaseEmergencyCooldown(cooldownUserId, cooldownNeighborhoodId);
