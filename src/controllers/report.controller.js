@@ -590,7 +590,7 @@ export const triggerEmergency = async (req, res) => {
             // ringTimeout: segundos que suena el telefono/chip antes de colgar.
             // 8s = suficiente para que el modulo GSM detecte el timbre y
             // active el rele (ocurre en el 1er timbre, ~3-4s).
-            ringTimeout: 8,
+            ringTimeout: 5,
             // validityPeriod: minutos que Infobip puede intentar la llamada.
             // 1 minuto evita que Infobip reintente automaticamente si no
             // contestan (las llamadas "fantasma" que llegaban solas).
