@@ -86,6 +86,20 @@ const infobipIsConfigured = Boolean(
   isE164PhoneNumber(INFOBIP_FROM_NUMBER),
 );
 
+// Cooldown por barrio para la llamada Infobip.
+// Garantiza que solo se haga UNA llamada por barrio cada 5 minutos,
+// sin importar cuantos usuarios presionen el boton de emergencia.
+const alarmCallCooldowns = new Map();
+const ALARM_CALL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos
+
+const canMakeAlarmCall = (neighborhoodId) => {
+  const last = alarmCallCooldowns.get(String(neighborhoodId));
+  return !last || Date.now() - last > ALARM_CALL_COOLDOWN_MS;
+};
+const registerAlarmCall = (neighborhoodId) => {
+  alarmCallCooldowns.set(String(neighborhoodId), Date.now());
+};
+
 // =============================================
 // REPORTES DE ACTIVIDAD SOSPECHOSA (sin sirena)
 // =============================================
@@ -569,12 +583,16 @@ export const triggerEmergency = async (req, res) => {
         "El numero de alarma del barrio no tiene formato E.164 valido.",
       );
     } else if (alarmNumber && infobipIsConfigured) {
+      // Verificar cooldown por barrio antes de llamar
+      if (!canMakeAlarmCall(neighborhood_id)) {
+        console.log(`⏳ [Infobip] Llamada omitida: el barrio ${neighborhoodName} ya fue alertado hace menos de 5 minutos.`);
+        delivery.infobip.status = "cooldown";
+        delivery.infobip.attempted = false;
+      } else {
       try {
         console.log(`📞 [Infobip] Llamando a la sirena del barrio ${neighborhoodName} → ${alarmNumber}`);
+        registerAlarmCall(neighborhood_id);
 
-        // /tts/3/single: hace una llamada de voz con texto leido (TTS).
-        // No requiere callsConfigurationId. La sirena timbra y activa el rele
-        // al detectar la llamada entrante (ring-trigger / CLIP).
         const infobipRes = await fetch(`${INFOBIP_BASE_URL}/tts/3/single`, {
           method: "POST",
           headers: {
@@ -587,15 +605,8 @@ export const triggerEmergency = async (req, res) => {
             to:   alarmNumber,
             text: `Alerta de emergencia activada en el barrio ${neighborhoodName}`,
             language: "es",
-            // ringTimeout 8 = ~3s setup de red + 5s de timbre real en el chip.
-            // Con ringTimeout:5 el setup consume todo el tiempo y no timbra.
+            // ringTimeout: 3s setup de red + 5s timbre real = 8s total.
             ringTimeout: 8,
-            // validityPeriod: minutos que Infobip puede intentar la llamada.
-            // 1 minuto evita que Infobip reintente automaticamente si no
-            // contestan (las llamadas "fantasma" que llegaban solas).
-            validityPeriod: 1,
-            // Sin reintentos: una sola llamada por emergencia activada.
-            retries: 0,
           }),
         });
 
@@ -622,6 +633,7 @@ export const triggerEmergency = async (req, res) => {
         delivery.infobip.status      = "failed";
         delivery.infobip.error_code  = infobipError.code || null;
       }
+      } // fin bloque cooldown
     } else if (hasAlarmNumber) {
       delivery.infobip.status = "not_configured";
       console.warn(
