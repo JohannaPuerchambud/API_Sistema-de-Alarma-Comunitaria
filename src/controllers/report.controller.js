@@ -587,7 +587,6 @@ export const triggerEmergency = async (req, res) => {
             to:   alarmNumber,
             text: `Alerta de emergencia activada en el barrio ${neighborhoodName}`,
             language: "es",
-            voice: { name: "Conchita", gender: "female" },
           }),
         });
 
