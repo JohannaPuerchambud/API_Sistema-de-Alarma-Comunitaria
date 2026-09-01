@@ -587,9 +587,11 @@ export const triggerEmergency = async (req, res) => {
             to:   alarmNumber,
             text: `Alerta de emergencia activada en el barrio ${neighborhoodName}`,
             language: "es",
-            // La sirena detecta el timbre (ring-trigger/CLIP) y activa el rele
-            // en los primeros 2-3 segundos. 5 s es mas que suficiente.
-            callTimeout: 5,
+            // callTimeout total desde que Infobip inicia la llamada:
+            //   ~2-3 s = setup de la red
+            //   ~12 s  = timbre real (modulo GSM activa rele en el 1er timbre ~3s)
+            // 15 s es el minimo seguro para que suene Y no espere demasiado.
+            callTimeout: 15,
           }),
         });
 
