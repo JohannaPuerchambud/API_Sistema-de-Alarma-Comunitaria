@@ -587,11 +587,16 @@ export const triggerEmergency = async (req, res) => {
             to:   alarmNumber,
             text: `Alerta de emergencia activada en el barrio ${neighborhoodName}`,
             language: "es",
-            // callTimeout total desde que Infobip inicia la llamada:
-            //   ~2-3 s = setup de la red
-            //   ~12 s  = timbre real (modulo GSM activa rele en el 1er timbre ~3s)
-            // 15 s es el minimo seguro para que suene Y no espere demasiado.
-            callTimeout: 15,
+            // ringTimeout: segundos que suena el telefono/chip antes de colgar.
+            // 8s = suficiente para que el modulo GSM detecte el timbre y
+            // active el rele (ocurre en el 1er timbre, ~3-4s).
+            ringTimeout: 8,
+            // validityPeriod: minutos que Infobip puede intentar la llamada.
+            // 1 minuto evita que Infobip reintente automaticamente si no
+            // contestan (las llamadas "fantasma" que llegaban solas).
+            validityPeriod: 1,
+            // Sin reintentos: una sola llamada por emergencia activada.
+            retries: 0,
           }),
         });
 
