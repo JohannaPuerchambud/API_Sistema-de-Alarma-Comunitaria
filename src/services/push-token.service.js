@@ -45,6 +45,12 @@ export const savePushToken = async (userId, fcmToken) => {
     );
   } catch (error) {
     if (!isMissingPushTokenTable(error)) throw error;
+    // Primero liberar el token de cualquier otro usuario que lo tenga
+    // (evita que el mismo dispositivo reciba notificaciones bajo otro user_id)
+    await pool.query(
+      "UPDATE users SET fcm_token = NULL WHERE fcm_token = $1 AND user_id != $2",
+      [fcmToken, userId],
+    );
     await pool.query(
       "UPDATE users SET fcm_token = $1 WHERE user_id = $2",
       [fcmToken, userId],

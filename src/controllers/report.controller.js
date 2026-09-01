@@ -572,7 +572,10 @@ export const triggerEmergency = async (req, res) => {
       try {
         console.log(`📞 [Infobip] Llamando a la sirena del barrio ${neighborhoodName} → ${alarmNumber}`);
 
-        const infobipRes = await fetch(`${INFOBIP_BASE_URL}/calls/1/calls`, {
+        // /tts/3/single: hace una llamada de voz con texto leido (TTS).
+        // No requiere callsConfigurationId. La sirena timbra y activa el rele
+        // al detectar la llamada entrante (ring-trigger / CLIP).
+        const infobipRes = await fetch(`${INFOBIP_BASE_URL}/tts/3/single`, {
           method: "POST",
           headers: {
             "Authorization": `App ${INFOBIP_API_KEY}`,
@@ -580,15 +583,11 @@ export const triggerEmergency = async (req, res) => {
             "Accept":         "application/json",
           },
           body: JSON.stringify({
-            endpoint: {
-              type: "PHONE",
-              phoneNumber: alarmNumber,
-            },
             from: INFOBIP_FROM_NUMBER,
-            // callTimeout: segundos que espera antes de colgar si la sirena
-            // no cuelga sola. 15 s es más que suficiente para el ring-trigger.
-            callTimeout: 15,
-            connectTimeout: 30,
+            to:   alarmNumber,
+            text: `Alerta de emergencia activada en el barrio ${neighborhoodName}`,
+            language: "es",
+            voice: { name: "Conchita", gender: "female" },
           }),
         });
 
@@ -598,13 +597,16 @@ export const triggerEmergency = async (req, res) => {
         delivery.infobip.attempted = true;
 
         if (infobipRes.ok) {
-          delivery.infobip.status   = infobipBody.status || "queued";
-          delivery.infobip.call_id  = infobipBody.id     || null;
-          console.log("🔊 ¡Llamada Infobip iniciada! ID:", delivery.infobip.call_id);
+          // TTS response: { bulkId, messages: [{ messageId, status: { groupName } }] }
+          const ttsStatus = infobipBody?.messages?.[0]?.status?.groupName || "queued";
+          const successGroups = new Set(["PENDING", "DELIVERED"]);
+          delivery.infobip.status  = successGroups.has(ttsStatus) ? "queued" : ttsStatus.toLowerCase();
+          delivery.infobip.call_id = infobipBody?.messages?.[0]?.messageId || infobipBody?.bulkId || null;
+          console.log("🔊 ¡Llamada Infobip TTS iniciada! ID:", delivery.infobip.call_id, "Status:", ttsStatus);
         } else {
           delivery.infobip.status     = infobipStatusFromError(infobipRes.status, infobipBody);
           delivery.infobip.error_code = infobipRes.status;
-          console.error("❌ Infobip rechazó la llamada:", infobipRes.status, JSON.stringify(infobipBody));
+          console.error("❌ Infobip rechazó la llamada TTS:", infobipRes.status, JSON.stringify(infobipBody));
         }
       } catch (infobipError) {
         console.error("❌ Error de red al llamar a Infobip:", infobipError.message);
