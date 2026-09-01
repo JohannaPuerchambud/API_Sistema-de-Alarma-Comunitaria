@@ -587,6 +587,9 @@ export const triggerEmergency = async (req, res) => {
             to:   alarmNumber,
             text: `Alerta de emergencia activada en el barrio ${neighborhoodName}`,
             language: "es",
+            // La sirena detecta el timbre (ring-trigger/CLIP) y activa el rele
+            // en los primeros 2-3 segundos. 5 s es mas que suficiente.
+            callTimeout: 5,
           }),
         });
 
