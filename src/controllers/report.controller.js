@@ -369,11 +369,7 @@ export const triggerEmergency = async (req, res) => {
       return res.status(404).json({ message: "Barrio no encontrado." });
     }
 
-    const configuredAlarmNumber = neighborhoodQuery.rows[0].alarm_number;
-    const rawAlarmNumber =
-      configuredAlarmNumber && configuredAlarmNumber !== "+593961662731"
-        ? configuredAlarmNumber
-        : (INFOBIP_FROM_NUMBER || configuredAlarmNumber);
+    const rawAlarmNumber = neighborhoodQuery.rows[0].alarm_number;
     const alarmNumber = normalizePhoneNumber(rawAlarmNumber);
     const hasAlarmNumber = Boolean(
       rawAlarmNumber && String(rawAlarmNumber).trim(),
